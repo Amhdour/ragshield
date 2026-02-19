@@ -60,6 +60,11 @@ curl -sS http://localhost:8000/chat \
   -d '{"query":"What docs exist?"}' ; echo
 ```
 
+
+## Tracing mode
+
+RAGShield currently uses **local tracing only** (`app/tracing.py`). Each `/chat` request gets a UUID `trace_id` that is returned in the API response. No external tracing backend is used.
+
 ## OPA policy checks
 
 Deny decision (boolean):

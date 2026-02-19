@@ -5,7 +5,6 @@ from __future__ import annotations
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
-from app.config import settings
 from app.graph import build_chat_graph
 from app.policy import check_policy
 from app.schema import AnswerPayload
@@ -30,9 +29,8 @@ chat_graph = build_chat_graph()
 
 @app.on_event("startup")
 def startup_log() -> None:
-    """Log tracing mode once at startup."""
-    if settings.LANGFUSE_HOST and settings.LANGFUSE_PUBLIC_KEY and settings.LANGFUSE_SECRET_KEY:
-        print("Langfuse credentials detected; using local tracing sink.")
+    """Log local tracing mode once at startup."""
+    print("Local tracing enabled")
 
 
 @app.post("/chat", response_model=ChatResponse)
