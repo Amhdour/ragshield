@@ -27,14 +27,24 @@ pip install -e .
 - `WEAVIATE_URL`
 - `LANGFUSE_PUBLIC_KEY` (optional)
 - `LANGFUSE_SECRET_KEY` (optional)
-- `LANGFUSE_HOST` (optional)
+- `LANGFUSE_HOST` (default `http://localhost:3000`)
+- `RAGSHIELD_ENV` (`dev` or `prod`)
+- `DEBUG_TRACE` (`true` only for local prompt capture debugging)
 - `OPA_URL`
 - `TOP_K` (default `5`)
 
 ## Start local dependencies
 
+Core stack (Weaviate + OPA):
+
 ```bash
 docker compose up -d
+```
+
+Optional Langfuse local stack:
+
+```bash
+docker compose --profile langfuse up -d langfuse langfuse-postgres langfuse-redis
 ```
 
 Readiness wait/retry helper:
@@ -67,6 +77,16 @@ curl -sS http://localhost:8000/chat \
   -H "Content-Type: application/json" \
   -d '{"query":"What docs exist?"}' ; echo
 ```
+
+## Tracing
+
+- If `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, and `LANGFUSE_HOST` are set, traces are sent to Langfuse and startup logs `Langfuse enabled`.
+- If those vars are missing, tracing automatically falls back to local stdout events (`Local tracing enabled`).
+- Safety default: request text is hashed/truncated unless `DEBUG_TRACE=true`.
+
+Demo notes:
+- For client demos, capture screenshots from your own local Langfuse UI session.
+- Do **not** commit screenshots into this repository.
 
 ## Run Promptfoo red-team checks
 

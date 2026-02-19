@@ -49,6 +49,8 @@ class Settings:
     LANGFUSE_PUBLIC_KEY: str | None
     LANGFUSE_SECRET_KEY: str | None
     LANGFUSE_HOST: str | None
+    RAGSHIELD_ENV: str
+    DEBUG_TRACE: bool
     OPA_URL: str
     TOP_K: int
 
@@ -92,6 +94,16 @@ class Settings:
         """Backwards-compatible lowercase accessor."""
         return self.LANGFUSE_HOST
 
+    @property
+    def ragshield_env(self) -> str:
+        """Backwards-compatible lowercase accessor."""
+        return self.RAGSHIELD_ENV
+
+    @property
+    def debug_trace(self) -> bool:
+        """Backwards-compatible lowercase accessor."""
+        return self.DEBUG_TRACE
+
 
 def load_settings() -> Settings:
     """Load settings from env vars with defaults and validation."""
@@ -108,6 +120,15 @@ def load_settings() -> Settings:
     if not litellm_model:
         raise ValueError("Invalid LITELLM_MODEL: value cannot be empty.")
 
+    ragshield_env = (os.getenv("RAGSHIELD_ENV", "dev") or "dev").strip().lower()
+    if ragshield_env not in {"dev", "prod"}:
+        raise ValueError("Invalid RAGSHIELD_ENV: expected 'dev' or 'prod'.")
+
+    debug_trace_raw = (os.getenv("DEBUG_TRACE", "false") or "false").strip().lower()
+    if debug_trace_raw not in {"1", "0", "true", "false", "yes", "no"}:
+        raise ValueError("Invalid DEBUG_TRACE: expected true/false.")
+    debug_trace = debug_trace_raw in {"1", "true", "yes"}
+
     return Settings(
         LITELLM_BASE_URL=_require_http_url(
             "LITELLM_BASE_URL", os.getenv("LITELLM_BASE_URL", "http://localhost:4000")
@@ -119,7 +140,11 @@ def load_settings() -> Settings:
         ),
         LANGFUSE_PUBLIC_KEY=os.getenv("LANGFUSE_PUBLIC_KEY") or None,
         LANGFUSE_SECRET_KEY=os.getenv("LANGFUSE_SECRET_KEY") or None,
-        LANGFUSE_HOST=_optional_http_url("LANGFUSE_HOST", os.getenv("LANGFUSE_HOST")),
+        LANGFUSE_HOST=_optional_http_url(
+            "LANGFUSE_HOST", os.getenv("LANGFUSE_HOST", "http://localhost:3000")
+        ),
+        RAGSHIELD_ENV=ragshield_env,
+        DEBUG_TRACE=debug_trace,
         OPA_URL=_require_http_url("OPA_URL", os.getenv("OPA_URL", "http://localhost:8181")),
         TOP_K=top_k,
     )

@@ -19,3 +19,36 @@ services:
       - ./opa:/policies:ro
     ports:
       - "8181:8181"
+
+  langfuse-postgres:
+    image: postgres:16-alpine
+    profiles: ["langfuse"]
+    environment:
+      POSTGRES_USER: langfuse
+      POSTGRES_PASSWORD: langfuse
+      POSTGRES_DB: langfuse
+    volumes:
+      - langfuse-postgres:/var/lib/postgresql/data
+
+  langfuse-redis:
+    image: redis:7-alpine
+    profiles: ["langfuse"]
+
+  langfuse:
+    image: langfuse/langfuse:2
+    profiles: ["langfuse"]
+    depends_on:
+      - langfuse-postgres
+      - langfuse-redis
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgresql://langfuse:langfuse@langfuse-postgres:5432/langfuse
+      REDIS_CONNECTION_STRING: redis://langfuse-redis:6379
+      NEXTAUTH_URL: http://localhost:3000
+      NEXTAUTH_SECRET: change-me-in-local-dev
+      SALT: change-me-in-local-dev
+      TELEMETRY_ENABLED: "false"
+
+volumes:
+  langfuse-postgres:
