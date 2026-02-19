@@ -1,6 +1,6 @@
 services:
   weaviate:
-    image: cr.weaviate.io/semitechnologies/weaviate:1.26.5
+    image: cr.weaviate.io/semitechnologies/weaviate:1.27.3
     ports:
       - "8080:8080"
     environment:
@@ -13,8 +13,8 @@ services:
 
   opa:
     image: openpolicyagent/opa:0.67.1
-    command: ["run", "--server", "--addr", "0.0.0.0:8181", "/policy/policy.rego"]
+    command: ["run", "--server", "--addr", "0.0.0.0:8181", "/policies/policy.rego"]
     volumes:
-      - ./opa/policy.rego:/policy/policy.rego:ro
+      - ./opa:/policies:ro
     ports:
       - "8181:8181"
