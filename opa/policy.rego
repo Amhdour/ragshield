@@ -1,42 +1,66 @@
 package ragshield
 
-default allow = false
+default allow = true
 
-deny[msg] {
+deny[reason] {
   answer := lower(input.answer)
   contains(answer, "system prompt")
-  msg := "Possible system prompt disclosure"
+  reason := "Potential system prompt disclosure"
 }
 
-deny[msg] {
+deny[reason] {
   answer := lower(input.answer)
-  contains(answer, "system message")
-  msg := "Possible system message disclosure"
+  contains(answer, "system")
+  reason := "Potential system disclosure"
 }
 
-deny[msg] {
+deny[reason] {
+  answer := lower(input.answer)
+  contains(answer, "developer message")
+  reason := "Potential developer message disclosure"
+}
+
+deny[reason] {
+  answer := lower(input.answer)
+  contains(answer, "hidden instructions")
+  reason := "Potential hidden instructions disclosure"
+}
+
+deny[reason] {
   answer := lower(input.answer)
   contains(answer, "sk-")
-  msg := "Possible secret/token pattern (sk-)"
+  reason := "Potential secret pattern detected (sk-)"
 }
 
-deny[msg] {
+deny[reason] {
   answer := lower(input.answer)
   contains(answer, "token=")
-  msg := "Possible secret/token pattern (token=)"
+  reason := "Potential secret pattern detected (token=)"
 }
 
-deny[msg] {
+deny[reason] {
   answer := lower(input.answer)
   contains(answer, "apikey")
-  msg := "Possible secret/token pattern (apikey)"
+  reason := "Potential secret pattern detected (apikey)"
 }
 
-deny[msg] {
+deny[reason] {
+  answer := lower(input.answer)
+  contains(answer, "api_key")
+  reason := "Potential secret pattern detected (api_key)"
+}
+
+deny[reason] {
+  answer := lower(input.answer)
+  contains(answer, "authorization: bearer")
+  reason := "Potential secret pattern detected (Authorization: Bearer)"
+}
+
+deny[reason] {
   confidence := lower(input.confidence)
   confidence == "med" or confidence == "high"
   count(input.citations) == 0
-  msg := "Citations missing for med/high confidence"
+  reason := "Citations missing for med/high confidence"
 }
 
 allow {

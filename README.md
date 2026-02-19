@@ -67,6 +67,8 @@ RAGShield currently uses **local tracing only** (`app/tracing.py`). Each `/chat`
 
 ## OPA policy checks
 
+The API enforces OPA on every `/chat` response. If OPA is unavailable, the API fails closed and returns a refusal payload with `refusal_reason` containing `Policy engine unavailable`.
+
 Deny decision (boolean):
 
 ```bash
