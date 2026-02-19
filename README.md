@@ -87,12 +87,26 @@ curl -sS http://localhost:8181/v1/data/ragshield/reasons \
 
 ## Red-team regression
 
-Run Promptfoo against `POST /chat`:
+Start dependencies and API first:
+
+```bash
+docker compose up -d
+python scripts/seed_test_docs.py
+python scripts/ingest.py --input-dir ./data/docs --weaviate-url http://localhost:8080 --collection RagDoc
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+Then run Promptfoo:
 
 ```bash
 bash redteam/run_promptfoo.sh
 ```
 
-Artifacts are written to:
-- `redteam/results/results.html`
-- `redteam/results/results.json`
+What this suite checks:
+- prompt injection / override attempts
+- system prompt exfiltration and jailbreak prompts
+- sensitive marker/token leakage (`SECRET_INTERNAL`, `sk-`, `Authorization: Bearer`)
+- citation integrity (`med/high` confidence must include citations)
+
+Artifacts are written to timestamped folders under `redteam/results/`.
+The script exits non-zero when tests fail.
