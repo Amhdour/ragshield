@@ -10,6 +10,15 @@ Minimal LangGraph RAG app with a portable trust/security layer.
 - `redteam/`: Promptfoo regression suite
 - `docs/`: reports and documentation
 
+
+## Module responsibilities
+
+- `app/retrieval.py`: canonical Weaviate retrieval implementation.
+- `app/llm.py`: canonical LiteLLM generation wrapper.
+- `app/schema.py`: canonical structured `AnswerPayload` + validation/repair helpers.
+- `app/policy.py`: canonical OPA policy gate integration.
+- `app/tracing.py`: canonical local tracing handle/span implementation.
+
 ## Quickstart
 
 ```bash
