@@ -78,7 +78,7 @@ deny[reason] {
 
 deny[reason] {
   confidence := lower(input.confidence)
-  confidence == "med" or confidence == "high"
+  {"med", "high"}[confidence]
   count(input.citations) == 0
   reason := "Citations missing for med/high confidence"
 }

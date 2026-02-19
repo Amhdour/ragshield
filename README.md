@@ -72,6 +72,13 @@ RAGShield currently uses **local tracing only** (`app/tracing.py`). Each `/chat`
 
 ## OPA policy checks
 
+
+Quick OPA reload validation:
+
+```bash
+docker compose up -d --force-recreate opa
+curl -sS http://localhost:8181/health ; echo
+```
 The API enforces OPA on every `/chat` response. If OPA is unavailable, the API fails closed and returns a refusal payload with `refusal_reason` containing `Policy engine unavailable`.
 
 Deny decision (boolean):
