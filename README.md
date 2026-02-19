@@ -97,3 +97,28 @@ bash redteam/run_promptfoo.sh
 ```
 
 Artifacts are written under `redteam/results/`.
+
+
+## CI
+
+GitHub Actions runs `.github/workflows/ci.yml` on every pull request.
+
+What it does:
+- installs Python + Node dependencies
+- starts Weaviate + OPA with Docker Compose
+- seeds + ingests docs
+- runs a Python smoke check (`py_compile` + `import app.main`)
+- runs `promptfoo eval -c redteam/promptfoo.yaml` when `OPENAI_API_KEY` secret is available
+- skips promptfoo with a clear message when the secret is unavailable (e.g., fork PRs)
+
+Local reproduction:
+
+```bash
+pip install -e .
+npm install -g promptfoo
+docker compose up -d weaviate opa
+python scripts/seed_test_docs.py
+python scripts/ingest.py --input-dir ./data/docs --weaviate-url http://localhost:8080 --collection RagDoc
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+promptfoo eval -c redteam/promptfoo.yaml
+```
