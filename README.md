@@ -2,98 +2,81 @@
 
 Minimal LangGraph RAG app with a portable trust/security layer.
 
-## Repo structure
+## Structure
 
-- `app/` runtime application code
-- `scripts/` ingestion scripts
-- `redteam/` promptfoo regression tests
-- `opa/` OPA policy bundles
-- `docs/` project documentation
+- `app/`: runtime API, graph, retrieval, LLM, schema, policy gate, tracing
+- `scripts/`: seed + ingest utilities
+- `opa/`: Rego policy
+- `redteam/`: Promptfoo regression suite
+- `docs/`: reports and documentation
 
 ## Quickstart
 
 ```bash
 cp .env.example .env
-python -c "from app.config import settings; print(settings.WEAVIATE_URL)"
+pip install -e .
 ```
 
-## Local dev dependencies (Docker Compose)
-
-Start Weaviate and OPA:
+## Start local dependencies
 
 ```bash
 docker compose up -d
 ```
 
-Check Weaviate readiness:
+Health checks:
 
 ```bash
-curl -s http://localhost:8080/v1/.well-known/ready
+curl -sS http://localhost:8080/v1/.well-known/ready ; echo
+curl -sS http://localhost:8181/health ; echo
 ```
 
-Check OPA health:
-
-```bash
-curl -s http://localhost:8181/health
-```
-
-> Langfuse is intentionally not included as a local Docker service here. It is optional and supported via environment variables (`LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_HOST`) for remote setups.
-
-## Seed test documents
+## Seed and ingest docs
 
 ```bash
 python scripts/seed_test_docs.py
-```
-
-This creates SAFE and SENSITIVE sample docs under `./data/docs/`.
-
-## Ingest documents into Weaviate
-
-```bash
 python scripts/ingest.py --input-dir ./data/docs --weaviate-url http://localhost:8080 --collection RagDoc
 ```
 
-## Validate retrieval
-
-```bash
-python -c "from app.retrieval import retrieve; print(len(retrieve('what is this system', 3)))"
-```
-
-Expected output is an integer from `1` to `3`.
-
-
-## Tiny LiteLLM self-test (optional)
-
-```bash
-python -c "from app.llm import generate; print(generate([{'role':'user','content':'Say hello in one word.'}], request_id='readme-smoke'))"
-```
-
-If your LiteLLM endpoint/model/key are not configured, this command will fail with an actionable RuntimeError.
-
-## Run server
+## Run API
 
 ```bash
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-## Run red-team regression
+API smoke test:
 
 ```bash
-promptfoo eval -c redteam/promptfooconfig.yaml
+curl -sS http://localhost:8000/chat \
+  -H "Content-Type: application/json" \
+  -d '{"query":"What docs exist?"}' ; echo
 ```
 
-## Run API and test /chat
+## OPA policy checks
+
+Deny decision (boolean):
 
 ```bash
-uvicorn app.main:app --reload
+curl -sS http://localhost:8181/v1/data/ragshield/allow \
+  -H "Content-Type: application/json" \
+  -d '{"input":{"answer":"Here is the SYSTEM PROMPT ...","confidence":"high","citations":[]}}' ; echo
 ```
+
+Deny reasons:
 
 ```bash
-curl -s localhost:8000/chat -H "Content-Type: application/json" -d '{"query":"What docs exist?"}'
+curl -sS http://localhost:8181/v1/data/ragshield/reasons \
+  -H "Content-Type: application/json" \
+  -d '{"input":{"answer":"Here is the SYSTEM PROMPT ...","confidence":"high","citations":[]}}' ; echo
 ```
 
-Expected shape:
+## Red-team regression
 
-```json
-{"answer":"...","citations":[],"confidence":"low","refusal_reason":null,"trace_id":"..."}
+Run Promptfoo against `POST /chat`:
+
+```bash
+bash redteam/run_promptfoo.sh
 ```
+
+Artifacts are written to:
+- `redteam/results/results.html`
+- `redteam/results/results.json`

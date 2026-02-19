@@ -1,4 +1,4 @@
-"""Tracing utilities with safe no-op behavior when Langfuse is not configured."""
+"""Local tracing utilities (no external Langfuse dependency)."""
 
 from __future__ import annotations
 
@@ -6,8 +6,6 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Iterator
 from uuid import uuid4
-
-from app.config import settings
 
 
 @dataclass(slots=True)
@@ -37,15 +35,12 @@ class TraceHandle:
             self._events.append({"type": "output", "output": output})
 
     def flush(self) -> None:
-        """Flush trace events to the sink (stdout placeholder for now)."""
+        """Flush trace events to stdout."""
         if not self.enabled:
             return
         print(f"[trace] {self.trace_id} {self.name}: {len(self._events)} events")
 
 
 def start_trace(name: str, input: dict[str, object]) -> TraceHandle:
-    """Start a trace that becomes a no-op when Langfuse env vars are missing."""
-    enabled = bool(
-        settings.LANGFUSE_HOST and settings.LANGFUSE_PUBLIC_KEY and settings.LANGFUSE_SECRET_KEY
-    )
-    return TraceHandle(enabled=enabled, trace_id=str(uuid4()), name=name, input=input)
+    """Start a local trace for request execution."""
+    return TraceHandle(enabled=True, trace_id=str(uuid4()), name=name, input=input)
