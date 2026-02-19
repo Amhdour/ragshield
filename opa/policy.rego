@@ -3,7 +3,9 @@ package ragshield
 import future.keywords.in
 
 default allow = true
+default allow_action = true
 
+# Post-response guardrails (defense in depth)
 deny[reason] {
   answer := lower(input.answer)
   contains(answer, "system prompt")
@@ -90,3 +92,62 @@ allow {
 }
 
 reasons := [reason | deny[reason]]
+
+# Pre-action policy: block unsafe tool invocation before execution.
+prompt_injection_query {
+  q := lower(input.user_query)
+  contains(q, "ignore previous")
+}
+
+prompt_injection_query {
+  q := lower(input.user_query)
+  contains(q, "jailbreak")
+}
+
+prompt_injection_query {
+  q := lower(input.user_query)
+  contains(q, "developer message")
+}
+
+data_exfil_query {
+  q := lower(input.user_query)
+  contains(q, "system prompt")
+}
+
+data_exfil_query {
+  q := lower(input.user_query)
+  contains(q, "secret_internal")
+}
+
+data_exfil_query {
+  q := lower(input.user_query)
+  contains(q, "apikey")
+}
+
+data_exfil_query {
+  q := lower(input.user_query)
+  contains(q, "token=")
+}
+
+data_exfil_query {
+  q := lower(input.user_query)
+  contains(q, "sk-")
+}
+
+deny_action[reason] {
+  prompt_injection_query
+  input.action != "retrieval"
+  reason := "Pre-action denied: prompt injection risk, only retrieval allowed"
+}
+
+deny_action[reason] {
+  data_exfil_query
+  input.action != "retrieval"
+  reason := "Pre-action denied: exfiltration risk, only retrieval allowed"
+}
+
+allow_action {
+  count(deny_action) == 0
+}
+
+action_reasons := [reason | deny_action[reason]]

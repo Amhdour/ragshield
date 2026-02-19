@@ -9,6 +9,7 @@ from langgraph.graph import END, START, StateGraph
 
 from app.config import settings
 from app.llm import generate
+from app.policy import check_pre_action_policy
 from app.prompts import SYSTEM_PROMPT, USER_TEMPLATE
 from app.retrieval import retrieve
 from app.schema import validate_or_repair_output
@@ -23,11 +24,28 @@ class ChatState(TypedDict, total=False):
     context_docs: list[dict[str, str]]
     draft_answer: str
     answer_payload: dict[str, object]
+    pre_action_denied: list[str]
+
+
+def _deny_state(reasons: list[str]) -> ChatState:
+    """Return state patch used when pre-action policy denies a tool call."""
+    return {"pre_action_denied": reasons, "context_docs": [], "draft_answer": ""}
 
 
 def retrieve_node(state: ChatState) -> ChatState:
     """Fetch relevant context documents for the input query."""
     trace = state["trace"]
+    gate_span = start_span(trace, "pre_action_retrieval", {"action": "retrieval"})
+    allowed, reasons = check_pre_action_policy(
+        action="retrieval",
+        query=state["query"],
+        citation_count=0,
+        requested_data_scope="knowledge_base",
+    )
+    end_span(gate_span, {"allow": allowed, "reasons": reasons}, "ok")
+    if not allowed:
+        return _deny_state(reasons)
+
     span = start_span(trace, "retrieval", {"top_k": settings.TOP_K})
     docs = retrieve(state["query"], top_k=settings.TOP_K)
     end_span(
@@ -43,6 +61,9 @@ def retrieve_node(state: ChatState) -> ChatState:
 
 def draft_node(state: ChatState) -> ChatState:
     """Draft an answer from retrieved context using the LLM wrapper."""
+    if state.get("pre_action_denied"):
+        return {}
+
     trace = state["trace"]
     context_lines = [
         f"doc_id={doc.get('doc_id', '')}; category={doc.get('category', '')}; source={doc.get('source', '')}; content={doc.get('content', '')}"
@@ -54,6 +75,17 @@ def draft_node(state: ChatState) -> ChatState:
         "\nReturn ONLY valid JSON with keys: answer, citations, confidence, refusal_reason. "
         "Each citation must contain doc_id and quote."
     )
+
+    gate_span = start_span(trace, "pre_action_llm", {"action": "llm_generate"})
+    allowed, reasons = check_pre_action_policy(
+        action="llm_generate",
+        query=state["query"],
+        citation_count=len(state.get("context_docs", [])),
+        requested_data_scope="generated_answer",
+    )
+    end_span(gate_span, {"allow": allowed, "reasons": reasons}, "ok")
+    if not allowed:
+        return {"pre_action_denied": reasons}
 
     span = start_span(trace, "llm", {"model": settings.LITELLM_MODEL})
     answer = generate(
@@ -77,6 +109,19 @@ def draft_node(state: ChatState) -> ChatState:
 def finalize_node(state: ChatState) -> ChatState:
     """Validate/repair draft into structured `AnswerPayload` JSON."""
     trace = state["trace"]
+
+    if state.get("pre_action_denied"):
+        reasons = state.get("pre_action_denied", [])
+        payload_json = {
+            "answer": "I can’t comply with that request.",
+            "citations": [],
+            "confidence": "low",
+            "refusal_reason": "; ".join(reasons) if reasons else "Pre-action policy denied",
+        }
+        span = start_span(trace, "validation", {})
+        end_span(span, {"pre_action_denied": reasons}, "ok")
+        return {"answer_payload": payload_json}
+
     span = start_span(trace, "validation", {})
     payload = validate_or_repair_output(
         raw_output=state.get("draft_answer", ""),

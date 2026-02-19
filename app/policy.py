@@ -44,6 +44,43 @@ def _parse_reasons(result: Any) -> list[str]:
     return [str(result)]
 
 
+def _risk_flags(query: str) -> list[str]:
+    """Derive basic risk flags from user query for pre-action policy input."""
+    q = query.lower()
+    flags: list[str] = []
+    if any(token in q for token in ["ignore previous", "bypass", "jailbreak", "developer message"]):
+        flags.append("prompt_injection")
+    if any(token in q for token in ["system prompt", "secret_internal", "apikey", "token=", "sk-"]):
+        flags.append("data_exfiltration")
+    return flags
+
+
+def check_pre_action_policy(
+    *,
+    action: str,
+    query: str,
+    citation_count: int,
+    requested_data_scope: str,
+) -> tuple[bool, list[str]]:
+    """Return (allow, reasons) for pre-action policy checks before tool execution."""
+    payload = {
+        "action": action,
+        "user_query": query,
+        "risk_flags": _risk_flags(query),
+        "citation_count": citation_count,
+        "requested_data_scope": requested_data_scope,
+    }
+    try:
+        allow_data = _post_policy("/v1/data/ragshield/allow_action", payload)
+        reasons_data = _post_policy("/v1/data/ragshield/action_reasons", payload)
+        allow = _parse_allow(allow_data.get("result"))
+        reasons = _parse_reasons(reasons_data.get("result"))
+        return allow, reasons
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("OPA unavailable or error (%s); failing closed on pre-action gate.", exc)
+        return False, ["Policy engine unavailable"]
+
+
 def check_policy(payload: dict[str, Any]) -> tuple[bool, list[str]]:
     """Return (allow, reasons) from OPA, failing closed when OPA is unavailable."""
     try:
