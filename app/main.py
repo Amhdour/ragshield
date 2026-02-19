@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from pydantic import BaseModel, Field
 
 from app.graph import build_chat_graph
@@ -49,6 +49,17 @@ def chat(request: ChatRequest) -> ChatResponse:
         response = ChatResponse(**payload.model_dump(), trace_id=trace.trace_id)
         return response
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        message = str(exc)
+        if "Retrieval failed" in message or "Weaviate" in message:
+            refusal_reason = "Retrieval failed: Weaviate unavailable"
+        else:
+            refusal_reason = "Policy engine unavailable"
+        payload = AnswerPayload(
+            answer="I can’t comply with that request.",
+            citations=[],
+            confidence="low",
+            refusal_reason=refusal_reason,
+        )
+        return ChatResponse(**payload.model_dump(), trace_id=trace.trace_id)
     finally:
         trace.flush()
