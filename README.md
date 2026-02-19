@@ -34,6 +34,17 @@ docker compose up -d
 
 Health checks:
 
+Readiness wait/retry helper:
+
+```bash
+for i in {1..20}; do
+  curl -fsS http://localhost:8080/v1/.well-known/ready && break
+  sleep 1
+done
+curl -fsS http://localhost:8181/health ; echo
+```
+Health checks:
+
 ```bash
 curl -sS http://localhost:8080/v1/.well-known/ready ; echo
 curl -sS http://localhost:8181/health ; echo

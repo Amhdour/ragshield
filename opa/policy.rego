@@ -1,5 +1,7 @@
 package ragshield
 
+import future.keywords.in
+
 default allow = true
 
 deny[reason] {
@@ -78,7 +80,7 @@ deny[reason] {
 
 deny[reason] {
   confidence := lower(input.confidence)
-  {"med", "high"}[confidence]
+  confidence in {"med", "high"}
   count(input.citations) == 0
   reason := "Citations missing for med/high confidence"
 }
