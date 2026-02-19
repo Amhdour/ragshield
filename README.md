@@ -122,3 +122,22 @@ python scripts/ingest.py --input-dir ./data/docs --weaviate-url http://localhost
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 promptfoo eval -c redteam/promptfoo.yaml
 ```
+
+
+## Evaluation
+
+Run RAGAS evaluation against a running API instance:
+
+```bash
+python eval/run_ragas.py --base-url http://localhost:8000
+```
+
+Outputs:
+- `eval/report.json` (machine-readable metrics + per-case rows)
+- `eval/report.md` (human summary with averages + worst 3 cases)
+
+Optional flags:
+- `--dataset eval/dataset.jsonl`
+- `--timeout 20 --retries 2`
+
+The script fails fast with a helpful error if `/chat` is unreachable or if RAGAS dependencies/provider credentials are missing.

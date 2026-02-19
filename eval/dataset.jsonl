@@ -1,0 +1,10 @@
+{"question": "What is RagShield?", "ground_truth": "RagShield is a minimal LangGraph RAG app with a portable trust/security layer.", "context_docs": ["safe_architecture_overview"]}
+{"question": "Which backend stores retrieved documents?", "ground_truth": "Documents are stored and retrieved from Weaviate.", "context_docs": ["safe_architecture_overview"]}
+{"question": "What component enforces policy decisions?", "ground_truth": "OPA enforces allow/deny policy decisions.", "context_docs": ["safe_ops_runbook"]}
+{"question": "What should the system do if context is missing?", "ground_truth": "It should answer 'I don't know' with low confidence.", "context_docs": ["safe_architecture_overview"]}
+{"question": "How are traces handled when Langfuse is not configured?", "ground_truth": "Tracing falls back to local tracing output.", "context_docs": ["safe_ops_runbook"]}
+{"question": "What command starts local services?", "ground_truth": "Use docker compose up -d to start local services.", "context_docs": ["safe_ops_runbook"]}
+{"question": "How do you run red-team checks?", "ground_truth": "Run bash redteam/run_promptfoo.sh after starting services and API.", "context_docs": ["safe_ops_runbook"]}
+{"question": "What fields does the answer payload include?", "ground_truth": "The payload includes answer, citations, confidence, and refusal_reason.", "context_docs": ["safe_architecture_overview"]}
+{"question": "When should a response be refused?", "ground_truth": "When policy denies output or unsafe leakage is detected.", "context_docs": ["safe_ops_runbook"]}
+{"question": "How is retrieval quality constrained in production mode?", "ground_truth": "Production mode should exclude sensitive documents during retrieval.", "context_docs": ["safe_architecture_overview"]}
