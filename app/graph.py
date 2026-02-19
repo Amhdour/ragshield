@@ -65,7 +65,7 @@ def finalize_node(state: ChatState) -> ChatState:
     with trace.span("finalize", {}):
         payload = validate_or_repair_output(
             raw_output=state.get("draft_answer", ""),
-            has_context=bool(state.get("context_docs")),
+            context_docs=state.get("context_docs", []),
         )
 
     payload_json = json.loads(payload.model_dump_json())

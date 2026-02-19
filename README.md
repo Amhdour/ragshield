@@ -60,6 +60,11 @@ curl -sS http://localhost:8000/chat \
   -d '{"query":"What docs exist?"}' ; echo
 ```
 
+API contract notes:
+- `/chat` always returns `AnswerPayload` keys: `answer`, `citations`, `confidence`, `refusal_reason` (plus `trace_id`).
+- If no relevant context is found, response is `"I don't know"` with `confidence="low"`, non-empty `refusal_reason`, and empty citations.
+- If `confidence` is `med`/`high`, citations are guaranteed non-empty with `doc_id` + `quote` tied to retrieved docs.
+
 
 ## Tracing mode
 

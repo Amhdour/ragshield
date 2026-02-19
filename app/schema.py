@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, ValidationError
 
@@ -47,9 +47,55 @@ def _fallback_payload(reason: str) -> AnswerPayload:
     )
 
 
-def validate_or_repair_output(raw_output: str, has_context: bool) -> AnswerPayload:
+def _short_quote(content: str, limit: int = 160) -> str:
+    """Create a short citation quote from a document content field."""
+    snippet = " ".join(content.split())
+    return snippet[:limit] if snippet else "Context excerpt unavailable"
+
+
+def _context_map(context_docs: list[dict[str, str]]) -> dict[str, dict[str, str]]:
+    """Index context documents by doc_id."""
+    return {
+        str(doc.get("doc_id", "")).strip(): doc
+        for doc in context_docs
+        if str(doc.get("doc_id", "")).strip()
+    }
+
+
+def _normalize_payload(payload: AnswerPayload, context_docs: list[dict[str, str]]) -> AnswerPayload:
+    """Ensure citations align to retrieved docs and confidence/citation invariants hold."""
+    docs_by_id = _context_map(context_docs)
+
+    valid_citations: list[Citation] = []
+    for citation in payload.citations:
+        if citation.doc_id not in docs_by_id:
+            continue
+        quote = citation.quote.strip() or _short_quote(docs_by_id[citation.doc_id].get("content", ""))
+        valid_citations.append(Citation(doc_id=citation.doc_id, quote=quote))
+
+    if payload.confidence in {"med", "high"} and not valid_citations:
+        first_doc_id = next(iter(docs_by_id.keys()), "")
+        if first_doc_id:
+            valid_citations = [
+                Citation(
+                    doc_id=first_doc_id,
+                    quote=_short_quote(docs_by_id[first_doc_id].get("content", "")),
+                )
+            ]
+        else:
+            return _fallback_payload("No valid citations for med/high confidence")
+
+    return AnswerPayload(
+        answer=payload.answer,
+        citations=valid_citations,
+        confidence=payload.confidence,
+        refusal_reason=payload.refusal_reason,
+    )
+
+
+def validate_or_repair_output(raw_output: str, context_docs: list[dict[str, str]]) -> AnswerPayload:
     """Validate model output as `AnswerPayload`, with fallback on invalid data."""
-    if not has_context:
+    if not context_docs:
         return _fallback_payload("No relevant context retrieved")
 
     candidate = _extract_json_candidate(raw_output)
@@ -62,12 +108,14 @@ def validate_or_repair_output(raw_output: str, has_context: bool) -> AnswerPaylo
         guarded = guard.parse(candidate)
         validated_output = getattr(guarded, "validated_output", None)
         if isinstance(validated_output, dict):
-            return AnswerPayload.model_validate(validated_output)
+            payload = AnswerPayload.model_validate(validated_output)
+            return _normalize_payload(payload, context_docs)
     except Exception:
         pass
 
     try:
-        parsed = json.loads(candidate)
-        return AnswerPayload.model_validate(parsed)
+        parsed: Any = json.loads(candidate)
+        payload = AnswerPayload.model_validate(parsed)
+        return _normalize_payload(payload, context_docs)
     except (json.JSONDecodeError, ValidationError, TypeError):
         return _fallback_payload("Output schema validation failed")
