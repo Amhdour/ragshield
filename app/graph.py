@@ -20,6 +20,8 @@ class ChatState(TypedDict, total=False):
     """State carried across the RAG pipeline."""
 
     query: str
+    user_role: str
+    risk_flags: dict[str, bool]
     trace: TraceHandle
     context_docs: list[dict[str, object]]
     draft_answer: str
@@ -32,17 +34,32 @@ def _deny_state(reasons: list[str]) -> ChatState:
     return {"pre_action_denied": reasons, "context_docs": [], "draft_answer": ""}
 
 
+def _infer_risk_flags(query: str) -> dict[str, bool]:
+    """Infer request risk booleans from simple lexical heuristics."""
+    lowered = query.lower()
+    exfil_suspected = any(token in lowered for token in ["system prompt", "hidden instructions", "api key"])
+    injection_suspected = any(token in lowered for token in ["ignore previous", "developer message"])
+    return {
+        "injection_suspected": injection_suspected,
+        "exfil_suspected": exfil_suspected,
+    }
+
+
 def retrieve_node(state: ChatState) -> ChatState:
     """Fetch relevant context documents for the input query."""
     trace = state["trace"]
-    gate_span = start_span(trace, "pre_action_retrieval", {"action": "retrieval"})
+    user_role = state.get("user_role", "user")
+    risk_flags = state.get("risk_flags") or _infer_risk_flags(state["query"])
+
+    gate_span = start_span(trace, "pre_action_retrieval", {"action": "retrieval", "user_role": user_role})
     allowed, reasons = check_pre_action_policy(
         action="retrieval",
-        query=state["query"],
-        citation_count=0,
         requested_data_scope="knowledge_base",
+        user_role="admin" if user_role == "admin" else "user",
+        injection_suspected=bool(risk_flags.get("injection_suspected", False)),
+        exfil_suspected=bool(risk_flags.get("exfil_suspected", False)),
     )
-    end_span(gate_span, {"allow": allowed, "reasons": reasons}, "ok")
+    end_span(gate_span, {"allow": allowed, "reasons": reasons, "risk_flags": risk_flags}, "ok")
     if not allowed:
         return _deny_state(reasons)
 
@@ -56,7 +73,7 @@ def retrieve_node(state: ChatState) -> ChatState:
         },
         "ok",
     )
-    return {"context_docs": docs}
+    return {"context_docs": docs, "risk_flags": risk_flags}
 
 
 def draft_node(state: ChatState) -> ChatState:
@@ -65,6 +82,9 @@ def draft_node(state: ChatState) -> ChatState:
         return {}
 
     trace = state["trace"]
+    user_role = state.get("user_role", "user")
+    risk_flags = state.get("risk_flags") or _infer_risk_flags(state["query"])
+
     context_lines = [
         (
             f"evidence_id={doc.get('doc_id', '')}; "
@@ -82,14 +102,15 @@ def draft_node(state: ChatState) -> ChatState:
     stuffed_context = "\n".join(context_lines) if context_lines else "(no evidence)"
     user_prompt = USER_TEMPLATE.format(query=state["query"], context=stuffed_context)
 
-    gate_span = start_span(trace, "pre_action_llm", {"action": "llm_generate"})
+    gate_span = start_span(trace, "pre_action_llm", {"action": "llm", "user_role": user_role})
     allowed, reasons = check_pre_action_policy(
-        action="llm_generate",
-        query=state["query"],
-        citation_count=len(state.get("context_docs", [])),
-        requested_data_scope="generated_answer",
+        action="llm",
+        requested_data_scope="knowledge_base",
+        user_role="admin" if user_role == "admin" else "user",
+        injection_suspected=bool(risk_flags.get("injection_suspected", False)),
+        exfil_suspected=bool(risk_flags.get("exfil_suspected", False)),
     )
-    end_span(gate_span, {"allow": allowed, "reasons": reasons}, "ok")
+    end_span(gate_span, {"allow": allowed, "reasons": reasons, "risk_flags": risk_flags}, "ok")
     if not allowed:
         return {"pre_action_denied": reasons}
 
@@ -109,7 +130,7 @@ def draft_node(state: ChatState) -> ChatState:
         },
         "ok",
     )
-    return {"draft_answer": answer}
+    return {"draft_answer": answer, "risk_flags": risk_flags}
 
 
 def finalize_node(state: ChatState) -> ChatState:

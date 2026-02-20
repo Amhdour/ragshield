@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Header
 from pydantic import BaseModel, Field
 
 from app.config import settings
 from app.graph import build_chat_graph
-from app.policy import check_policy
+from app.policy import check_policy, check_pre_action_policy
 from app.schema import AnswerPayload
 from app.tracing import end_span, end_trace, start_span, start_trace
 
@@ -30,6 +30,13 @@ app = FastAPI(title="ragshield")
 chat_graph = build_chat_graph()
 
 
+def _normalize_role(value: str | None) -> str:
+    """Normalize untrusted role header to policy-supported roles."""
+    if value and value.lower() == "admin":
+        return "admin"
+    return "user"
+
+
 @app.on_event("startup")
 def startup_log() -> None:
     """Log tracing backend mode once at startup."""
@@ -40,12 +47,16 @@ def startup_log() -> None:
 
 
 @app.post("/chat", response_model=ChatResponse)
-def chat(request: ChatRequest) -> ChatResponse:
+def chat(request: ChatRequest, x_role: str | None = Header(default=None, alias="X-Role")) -> ChatResponse:
     """Run RAG graph and return structured answer payload."""
-    trace = start_trace(request_id=str(uuid4()), metadata={"query": request.query})
-    request_span = start_span(trace, "request", {"endpoint": "/chat"})
+    user_role = _normalize_role(x_role)
+    trace = start_trace(
+        request_id=str(uuid4()),
+        metadata={"query": request.query, "user_role": user_role},
+    )
+    request_span = start_span(trace, "request", {"endpoint": "/chat", "user_role": user_role})
     try:
-        result = chat_graph.invoke({"query": request.query, "trace": trace})
+        result = chat_graph.invoke({"query": request.query, "trace": trace, "user_role": user_role})
         payload = AnswerPayload.model_validate(result.get("answer_payload", {}))
 
         policy_span = start_span(
@@ -57,6 +68,22 @@ def chat(request: ChatRequest) -> ChatResponse:
             },
         )
         context_docs = result.get("context_docs", [])
+        risk_flags = result.get("risk_flags", {})
+
+        return_allowed, return_reasons = check_pre_action_policy(
+            action="return_answer",
+            requested_data_scope="knowledge_base",
+            user_role="admin" if user_role == "admin" else "user",
+            injection_suspected=bool(risk_flags.get("injection_suspected", False)),
+            exfil_suspected=bool(risk_flags.get("exfil_suspected", False)),
+            response_is_refusal=bool(payload.refusal_reason),
+        )
+        if not return_allowed:
+            payload.answer = "I can’t comply with that request."
+            payload.citations = []
+            payload.confidence = "low"
+            payload.refusal_reason = "; ".join(return_reasons) if return_reasons else "Policy denied"
+
         context_chunks = [
             {
                 "doc_id": str(doc.get("doc_id", "")),
@@ -71,7 +98,16 @@ def chat(request: ChatRequest) -> ChatResponse:
         policy_input = payload.model_dump()
         policy_input["context_chunks"] = context_chunks
         allow, reasons = check_policy(policy_input)
-        end_span(policy_span, {"allow": allow, "reasons": reasons}, "ok")
+        end_span(
+            policy_span,
+            {
+                "allow": allow,
+                "reasons": reasons,
+                "return_allow": return_allowed,
+                "return_reasons": return_reasons,
+            },
+            "ok",
+        )
 
         if not allow:
             payload.answer = "I can’t comply with that request."

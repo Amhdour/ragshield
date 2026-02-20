@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 
 from app.config import settings
 
 logger = logging.getLogger(__name__)
+
+ActionType = Literal["retrieval", "llm", "return_answer", "debug"]
+DataScope = Literal["knowledge_base", "sensitive", "admin"]
+RoleType = Literal["user", "admin"]
 
 
 def _post_policy(path: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -50,31 +54,25 @@ def _parse_reasons(result: Any) -> list[str]:
     return [str(result)]
 
 
-def _risk_flags(query: str) -> list[str]:
-    """Derive basic risk flags from user query for pre-action policy input."""
-    q = query.lower()
-    flags: list[str] = []
-    if any(token in q for token in ["ignore previous", "bypass", "jailbreak", "developer message"]):
-        flags.append("prompt_injection")
-    if any(token in q for token in ["system prompt", "secret_internal", "apikey", "token=", "sk-"]):
-        flags.append("data_exfiltration")
-    return flags
-
-
 def check_pre_action_policy(
     *,
-    action: str,
-    query: str,
-    citation_count: int,
-    requested_data_scope: str,
+    action: ActionType,
+    requested_data_scope: DataScope,
+    user_role: RoleType = "user",
+    injection_suspected: bool = False,
+    exfil_suspected: bool = False,
+    response_is_refusal: bool = False,
 ) -> tuple[bool, list[str]]:
-    """Return (allow, reasons) for pre-action policy checks before tool execution."""
+    """Return (allow, reasons) for pre-action policy checks before sensitive actions."""
     payload = {
         "action": action,
-        "user_query": query,
-        "risk_flags": _risk_flags(query),
-        "citation_count": citation_count,
         "requested_data_scope": requested_data_scope,
+        "user_role": user_role,
+        "risk_flags": {
+            "injection_suspected": bool(injection_suspected),
+            "exfil_suspected": bool(exfil_suspected),
+        },
+        "response_is_refusal": bool(response_is_refusal),
     }
     try:
         allow_data = _post_policy("/v1/data/ragshield/allow_action", payload)

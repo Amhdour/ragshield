@@ -124,57 +124,49 @@ allow {
 
 reasons := [reason | deny[reason]]
 
-# Pre-action policy: block unsafe tool invocation before execution.
-prompt_injection_query {
-  q := lower(input.user_query)
-  contains(q, "ignore previous")
+# -----------------------------------------------------------------------------
+# Pre-action policy pack
+# Inputs expected:
+# - action: retrieval|llm|return_answer|debug
+# - requested_data_scope: knowledge_base|sensitive|admin
+# - user_role: user|admin
+# - risk_flags: {injection_suspected: bool, exfil_suspected: bool}
+# - response_is_refusal: bool (used for return_answer when exfil risk is present)
+# -----------------------------------------------------------------------------
+
+deny_action[reason] {
+  input.requested_data_scope == "sensitive"
+  input.user_role != "admin"
+  reason := "Pre-action denied: sensitive scope requires admin role"
 }
 
-prompt_injection_query {
-  q := lower(input.user_query)
-  contains(q, "jailbreak")
+# Normal users can only retrieve from knowledge_base.
+deny_action[reason] {
+  input.action == "retrieval"
+  input.user_role != "admin"
+  input.requested_data_scope != "knowledge_base"
+  reason := "Pre-action denied: normal users may retrieve only knowledge_base scope"
 }
 
-prompt_injection_query {
-  q := lower(input.user_query)
-  contains(q, "developer message")
-}
-
-data_exfil_query {
-  q := lower(input.user_query)
-  contains(q, "system prompt")
-}
-
-data_exfil_query {
-  q := lower(input.user_query)
-  contains(q, "secret_internal")
-}
-
-data_exfil_query {
-  q := lower(input.user_query)
-  contains(q, "apikey")
-}
-
-data_exfil_query {
-  q := lower(input.user_query)
-  contains(q, "token=")
-}
-
-data_exfil_query {
-  q := lower(input.user_query)
-  contains(q, "sk-")
+# Exfil risk blocks all actions except returning an explicit refusal.
+deny_action[reason] {
+  input.risk_flags.exfil_suspected
+  input.action != "return_answer"
+  reason := "Pre-action denied: exfiltration risk"
 }
 
 deny_action[reason] {
-  prompt_injection_query
-  input.action != "retrieval"
-  reason := "Pre-action denied: prompt injection risk, only retrieval allowed"
+  input.risk_flags.exfil_suspected
+  input.action == "return_answer"
+  not input.response_is_refusal
+  reason := "Pre-action denied: exfiltration risk requires refusal response"
 }
 
+# Injection risk disallows debug actions for all roles.
 deny_action[reason] {
-  data_exfil_query
-  input.action != "retrieval"
-  reason := "Pre-action denied: exfiltration risk, only retrieval allowed"
+  input.risk_flags.injection_suspected
+  input.action == "debug"
+  reason := "Pre-action denied: injection risk blocks debug action"
 }
 
 allow_action {
