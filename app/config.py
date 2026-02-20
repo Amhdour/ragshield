@@ -163,7 +163,7 @@ def load_settings() -> Settings:
 
     return Settings(
         LITELLM_BASE_URL=_require_http_url(
-            "LITELLM_BASE_URL", os.getenv("LITELLM_BASE_URL", "http://localhost:4000")
+            "LITELLM_BASE_URL", os.getenv("LITELLM_BASE_URL", "http://litellm:4000")
         ),
         DEFAULT_MODEL=default_model,
         LITELLM_MODEL=litellm_model,

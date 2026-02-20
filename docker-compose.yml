@@ -20,6 +20,16 @@ services:
     ports:
       - "8181:8181"
 
+  litellm:
+    image: ghcr.io/berriai/litellm:main-stable
+    command: ["--config", "/app/litellm_config.yaml", "--port", "4000", "--host", "0.0.0.0"]
+    volumes:
+      - ./litellm_config.yaml:/app/litellm_config.yaml:ro
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    ports:
+      - "4000:4000"
+
   langfuse-postgres:
     image: postgres:16-alpine
     profiles: ["langfuse"]

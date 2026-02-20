@@ -41,7 +41,7 @@ pip install -e .
 Common developer/demo flows are available via `make`:
 
 ```bash
-make up            # start weaviate + opa
+make up            # start weaviate + opa + litellm proxy
 make up-langfuse   # start full stack with langfuse profile
 make seed          # create demo docs
 make ingest        # ingest docs into weaviate
@@ -53,10 +53,10 @@ make down          # stop and cleanup local services
 
 ## Start local dependencies
 
-Core stack (Weaviate + OPA):
+Core stack (Weaviate + OPA + LiteLLM proxy):
 
 ```bash
-docker compose up -d
+docker compose up -d weaviate opa litellm
 ```
 
 Optional Langfuse local stack:
@@ -104,6 +104,31 @@ curl -sS http://localhost:8000/chat \
   -d '{"query":"What docs exist?"}' ; echo
 ```
 
+
+## LiteLLM proxy (gateway)
+
+This repo includes a `litellm` proxy service in Docker Compose using `litellm_config.yaml`.
+
+Why use it:
+- centralized model routing
+- easier provider key isolation
+- future cost/rate governance at a single gateway
+
+Defaults:
+- app default `LITELLM_BASE_URL` is `http://litellm:4000` for fully dockerized networking
+- for host-local app runs, set `LITELLM_BASE_URL=http://localhost:4000` in `.env`
+
+Start proxy with other core services:
+
+```bash
+docker compose up -d weaviate opa litellm
+```
+
+Quick proxy health check:
+
+```bash
+curl -sS http://localhost:4000/health/liveliness ; echo
+```
 
 ## Structured output mode
 

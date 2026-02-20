@@ -1,7 +1,7 @@
 .PHONY: up up-langfuse seed ingest run redteam eval down
 
 up:
-	docker compose up -d weaviate opa
+	docker compose up -d weaviate opa litellm
 
 up-langfuse:
 	docker compose --profile langfuse up -d
