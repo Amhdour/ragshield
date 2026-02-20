@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, ValidationError
+
+logger = logging.getLogger(__name__)
 
 
 class Citation(BaseModel):
@@ -93,14 +96,50 @@ def _normalize_payload(payload: AnswerPayload, context_docs: list[dict[str, str]
     )
 
 
+def _parse_and_validate(candidate: str, context_docs: list[dict[str, str]]) -> AnswerPayload:
+    """Parse JSON candidate and validate it against `AnswerPayload`."""
+    parsed: Any = json.loads(candidate)
+    payload = AnswerPayload.model_validate(parsed)
+    return _normalize_payload(payload, context_docs)
+
+
+def _repair_once(raw_output: str, context_docs: list[dict[str, str]]) -> str:
+    """Attempt one model-assisted repair to strict JSON output."""
+    from app.llm import generate
+    from app.prompts import REPAIR_PROMPT
+
+    context_lines = [
+        f"doc_id={doc.get('doc_id', '')}; content={doc.get('content', '')}"
+        for doc in context_docs
+    ]
+    repair_messages = [
+        {"role": "system", "content": REPAIR_PROMPT},
+        {
+            "role": "user",
+            "content": (
+                "Fix this output to valid JSON matching schema only.\n"
+                f"Previous output:\n{raw_output}\n\n"
+                f"Available evidence:\n{chr(10).join(context_lines)}"
+            ),
+        },
+    ]
+    return generate(messages=repair_messages)
+
+
 def validate_or_repair_output(raw_output: str, context_docs: list[dict[str, str]]) -> AnswerPayload:
-    """Validate model output as `AnswerPayload`, with fallback on invalid data."""
+    """Validate JSON output; attempt one repair; fallback safely on failure."""
     if not context_docs:
         return _fallback_payload("No relevant context retrieved")
 
     candidate = _extract_json_candidate(raw_output)
 
-    # Optional Guardrails path; fallback to Pydantic-only validation if unavailable.
+    # Parse/validate first.
+    try:
+        return _parse_and_validate(candidate, context_docs)
+    except (json.JSONDecodeError, ValidationError, TypeError):
+        pass
+
+    # Optional Guardrails path, if available.
     try:
         from guardrails import Guard  # type: ignore
 
@@ -113,9 +152,11 @@ def validate_or_repair_output(raw_output: str, context_docs: list[dict[str, str]
     except Exception:
         pass
 
+    # One repair attempt with the model.
     try:
-        parsed: Any = json.loads(candidate)
-        payload = AnswerPayload.model_validate(parsed)
-        return _normalize_payload(payload, context_docs)
-    except (json.JSONDecodeError, ValidationError, TypeError):
+        repaired_raw = _repair_once(raw_output=raw_output, context_docs=context_docs)
+        repaired_candidate = _extract_json_candidate(repaired_raw)
+        return _parse_and_validate(repaired_candidate, context_docs)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Schema repair failed; returning safe refusal payload (%s)", exc)
         return _fallback_payload("Output schema validation failed")

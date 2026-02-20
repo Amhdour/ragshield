@@ -66,15 +66,17 @@ def draft_node(state: ChatState) -> ChatState:
 
     trace = state["trace"]
     context_lines = [
-        f"doc_id={doc.get('doc_id', '')}; category={doc.get('category', '')}; source={doc.get('source', '')}; content={doc.get('content', '')}"
+        (
+            f"evidence_id={doc.get('doc_id', '')}; "
+            f"doc_id={doc.get('doc_id', '')}; "
+            f"category={doc.get('category', '')}; "
+            f"source={doc.get('source', '')}; "
+            f"content={doc.get('content', '')}"
+        )
         for doc in state.get("context_docs", [])
     ]
-    stuffed_context = "\n".join(context_lines) if context_lines else "(no context)"
+    stuffed_context = "\n".join(context_lines) if context_lines else "(no evidence)"
     user_prompt = USER_TEMPLATE.format(query=state["query"], context=stuffed_context)
-    user_prompt += (
-        "\nReturn ONLY valid JSON with keys: answer, citations, confidence, refusal_reason. "
-        "Each citation must contain doc_id and quote."
-    )
 
     gate_span = start_span(trace, "pre_action_llm", {"action": "llm_generate"})
     allowed, reasons = check_pre_action_policy(
