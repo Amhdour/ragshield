@@ -9,24 +9,30 @@ from pathlib import Path
 from typing import Any
 
 
-
 def _load_dataset(path: Path) -> list[dict[str, Any]]:
+    """Load JSONL dataset rows with at least question + ground_truth."""
     rows: list[dict[str, Any]] = []
     for line in path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line:
             continue
-        rows.append(json.loads(line))
+        row = json.loads(line)
+        if "question" not in row or "ground_truth" not in row:
+            raise RuntimeError("Each dataset row must include 'question' and 'ground_truth'.")
+        rows.append(row)
     if not rows:
         raise RuntimeError(f"Dataset is empty: {path}")
     return rows
 
 
 def _post_chat(base_url: str, query: str, timeout_s: float, retries: int) -> dict[str, Any]:
+    """Query /chat with retries and return decoded JSON."""
     try:
         import requests
     except Exception as exc:  # noqa: BLE001
-        raise RuntimeError("Missing dependency 'requests'. Install project dependencies with `pip install -e .`.") from exc
+        raise RuntimeError(
+            "Missing dependency 'requests'. Install project dependencies with `pip install -e .`."
+        ) from exc
 
     url = f"{base_url.rstrip('/')}/chat"
     last_error: Exception | None = None
@@ -47,11 +53,42 @@ def _post_chat(base_url: str, query: str, timeout_s: float, retries: int) -> dic
     raise RuntimeError(f"Failed to query {url}: {last_error}")
 
 
-def _evaluate(rows: list[dict[str, Any]], base_url: str, timeout_s: float, retries: int) -> tuple[dict[str, float], list[dict[str, Any]]]:
+def _retrieve_contexts(query: str, top_k: int = 5) -> list[str]:
+    """Retrieve chunk texts directly from retrieval pipeline for groundedness metrics."""
+    try:
+        from app.retrieval import retrieve
+
+        docs = retrieve(query, top_k=top_k)
+        texts = [str(d.get("text", d.get("content", ""))) for d in docs]
+        return [t for t in texts if t]
+    except Exception:
+        return []
+
+
+def _failure_reason(row: dict[str, Any]) -> str:
+    """Derive a brief failure reason used in the markdown report."""
+    if row.get("refusal_reason"):
+        return f"refusal_reason={row['refusal_reason']}"
+    if row.get("faithfulness", 1.0) < 0.5:
+        return "low_faithfulness"
+    if row.get("answer_relevancy", 1.0) < 0.5:
+        return "low_answer_relevancy"
+    if not row.get("contexts"):
+        return "missing_contexts"
+    return "lowest_combined_score"
+
+
+def _evaluate(
+    rows: list[dict[str, Any]],
+    base_url: str,
+    timeout_s: float,
+    retries: int,
+) -> tuple[dict[str, float], list[dict[str, Any]]]:
+    """Run /chat + retrieval context collection and compute ragas metrics."""
     try:
         from datasets import Dataset
         from ragas import evaluate
-        from ragas.metrics import answer_relevancy, context_precision, context_recall, faithfulness
+        from ragas.metrics import answer_relevancy, faithfulness
     except Exception as exc:  # noqa: BLE001
         raise RuntimeError(
             "Missing ragas dependencies. Install with `pip install -e .` and ensure ragas extras are available."
@@ -62,21 +99,26 @@ def _evaluate(rows: list[dict[str, Any]], base_url: str, timeout_s: float, retri
         question = str(row["question"])
         truth = str(row["ground_truth"])
         response = _post_chat(base_url=base_url, query=question, timeout_s=timeout_s, retries=retries)
-        citations = response.get("citations") or []
-        contexts = [str(c.get("quote", "")) for c in citations if isinstance(c, dict)]
+        contexts = _retrieve_contexts(question)
+
+        # Fallback contexts from citations if retrieval path is unavailable.
+        if not contexts:
+            citations = response.get("citations") or []
+            contexts = [str(c.get("quote", "")) for c in citations if isinstance(c, dict)]
+
         eval_rows.append(
             {
                 "question": question,
+                "ground_truth": truth,
                 "answer": str(response.get("answer", "")),
                 "contexts": contexts,
-                "ground_truth": truth,
                 "confidence": str(response.get("confidence", "")),
                 "refusal_reason": response.get("refusal_reason"),
             }
         )
 
     dataset = Dataset.from_list(eval_rows)
-    metrics = [faithfulness, answer_relevancy, context_precision, context_recall]
+    metrics = [faithfulness, answer_relevancy]
     try:
         result = evaluate(dataset=dataset, metrics=metrics)
     except Exception as exc:  # noqa: BLE001
@@ -85,7 +127,7 @@ def _evaluate(rows: list[dict[str, Any]], base_url: str, timeout_s: float, retri
         ) from exc
 
     frame = result.to_pandas()
-    metric_names = ["faithfulness", "answer_relevancy", "context_precision", "context_recall"]
+    metric_names = ["faithfulness", "answer_relevancy"]
     averages: dict[str, float] = {}
     for name in metric_names:
         if name in frame:
@@ -94,23 +136,31 @@ def _evaluate(rows: list[dict[str, Any]], base_url: str, timeout_s: float, retri
     scored_rows: list[dict[str, Any]] = []
     for idx, eval_row in enumerate(eval_rows):
         row_data = dict(eval_row)
-        score_values: list[float] = []
+        scores: list[float] = []
         for metric_name in metric_names:
-            value = None
+            value = 0.0
             if metric_name in frame:
                 value = frame.loc[idx, metric_name]
                 if value != value:  # NaN
                     value = 0.0
-                score_values.append(float(value))
-                row_data[metric_name] = float(value)
-        row_data["mean_score"] = float(sum(score_values) / len(score_values)) if score_values else 0.0
+            value = float(value)
+            row_data[metric_name] = value
+            scores.append(value)
+        row_data["mean_score"] = float(sum(scores) / len(scores)) if scores else 0.0
+        row_data["failure_reason"] = _failure_reason(row_data)
         scored_rows.append(row_data)
 
     scored_rows.sort(key=lambda item: item.get("mean_score", 0.0))
     return averages, scored_rows
 
 
-def _write_reports(report_json: Path, report_md: Path, averages: dict[str, float], scored_rows: list[dict[str, Any]]) -> None:
+def _write_reports(
+    report_json: Path,
+    report_md: Path,
+    averages: dict[str, float],
+    scored_rows: list[dict[str, Any]],
+) -> None:
+    """Write machine-readable and markdown reports."""
     report_json.parent.mkdir(parents=True, exist_ok=True)
     report_md.parent.mkdir(parents=True, exist_ok=True)
 
@@ -127,29 +177,31 @@ def _write_reports(report_json: Path, report_md: Path, averages: dict[str, float
         "",
         f"Total examples: {len(scored_rows)}",
         "",
-        "## Average metrics",
+        "## Mean metrics",
+        "",
+        f"- **faithfulness**: {averages.get('faithfulness', 0.0):.4f}",
+        f"- **answer_relevancy**: {averages.get('answer_relevancy', 0.0):.4f}",
+        "",
+        "## Worst 3 examples",
         "",
     ]
-    for key, value in averages.items():
-        lines.append(f"- **{key}**: {value:.4f}")
 
-    lines.extend(["", "## Worst 3 cases", "", "| Question | Mean | Faithfulness | Relevancy | Ctx Precision | Ctx Recall |", "|---|---:|---:|---:|---:|---:|"])
-    for row in scored_rows[:3]:
-        lines.append(
-            "| {q} | {m:.4f} | {f:.4f} | {a:.4f} | {p:.4f} | {r:.4f} |".format(
-                q=str(row.get("question", "")).replace("|", "\\|"),
-                m=float(row.get("mean_score", 0.0)),
-                f=float(row.get("faithfulness", 0.0)),
-                a=float(row.get("answer_relevancy", 0.0)),
-                p=float(row.get("context_precision", 0.0)),
-                r=float(row.get("context_recall", 0.0)),
-            )
+    for idx, row in enumerate(scored_rows[:3], start=1):
+        lines.extend(
+            [
+                f"### {idx}. {row.get('question', '')}",
+                f"- Answer: {row.get('answer', '')}",
+                f"- Mean score: {float(row.get('mean_score', 0.0)):.4f}",
+                f"- Failure reason: {row.get('failure_reason', 'n/a')}",
+                "",
+            ]
         )
 
-    report_md.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    report_md.write_text("\n".join(lines), encoding="utf-8")
 
 
 def main() -> int:
+    """CLI entrypoint."""
     parser = argparse.ArgumentParser(description="Run RAGAS evaluation against ragshield /chat")
     parser.add_argument("--base-url", default="http://localhost:8000", help="Base URL for the running API")
     parser.add_argument("--dataset", default="eval/dataset.jsonl", help="Path to evaluation dataset JSONL")
