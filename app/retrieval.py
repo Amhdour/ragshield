@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 from urllib.parse import urlparse
 
@@ -9,6 +10,8 @@ import weaviate
 
 from app.config import settings
 from app.embeddings import embed_texts
+
+logger = logging.getLogger(__name__)
 
 
 def embeddings_available() -> bool:
@@ -98,6 +101,7 @@ def retrieve(query: str, top_k: int) -> list[dict[str, str | int | float | None]
         raise RuntimeError("top_k must be >= 1")
 
     mode = _resolve_retrieval_mode()
+    logger.info("retrieval_mode=%s embeddings_enabled=%s top_k=%s", mode, embeddings_available(), top_k)
 
     try:
         with weaviate.connect_to_custom(

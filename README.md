@@ -159,9 +159,31 @@ If embedding base/model are unset, embeddings are treated as disabled.
 Before choosing `EMBEDDING_MODEL` on OpenRouter, list available IDs:
 
 ```bash
+curl -H "Authorization: Bearer $EMBEDDING_API_KEY" https://openrouter.ai/api/v1/embeddings/models | head
 python scripts/check_openrouter_embeddings_models.py --contains "embedding"
 python scripts/check_openrouter_embeddings_models.py --contains "openai"
 ```
+
+## Verify hybrid retrieval is active
+
+Use this quick check to confirm runtime selected hybrid mode:
+
+1. Set retrieval mode and embeddings env vars:
+
+```bash
+export RETRIEVAL_MODE=auto
+export EMBEDDING_BASE_URL=https://openrouter.ai/api/v1
+export EMBEDDING_API_KEY=your_openrouter_api_key
+export EMBEDDING_MODEL=provider/model
+```
+
+2. Run the API and send one `/chat` request.
+3. Confirm logs include:
+- `retrieval_mode=hybrid`
+- `embeddings_enabled=True`
+- `top_k=<value>`
+
+If embeddings are unavailable, logs will show `retrieval_mode=bm25` (auto fallback).
 
 ## LiteLLM proxy (gateway)
 
