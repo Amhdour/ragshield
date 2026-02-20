@@ -10,7 +10,7 @@ from app.config import settings
 
 
 def retrieve(query: str, top_k: int) -> list[dict[str, str]]:
-    """Retrieve matching documents from RagDoc by BM25 query."""
+    """Retrieve matching document chunks from RagDoc by BM25 query."""
     endpoint = urlparse(settings.WEAVIATE_URL)
     if not endpoint.hostname:
         raise RuntimeError(f"Invalid WEAVIATE_URL: {settings.WEAVIATE_URL}")
@@ -32,12 +32,16 @@ def retrieve(query: str, top_k: int) -> list[dict[str, str]]:
             docs: list[dict[str, str]] = []
             for obj in response.objects:
                 props = obj.properties
+                text = str(props.get("text", ""))
                 docs.append(
                     {
                         "doc_id": str(props.get("doc_id", "")),
+                        "chunk_id": str(props.get("chunk_id", "")),
+                        "chunk_index": str(props.get("chunk_index", "")),
                         "category": str(props.get("category", "")),
                         "source": str(props.get("source", "")),
-                        "content": str(props.get("content", "")),
+                        "text": text,
+                        "content": text,
                     }
                 )
             return docs

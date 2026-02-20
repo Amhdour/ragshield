@@ -56,7 +56,18 @@ def chat(request: ChatRequest) -> ChatResponse:
                 "citation_count": len(payload.citations),
             },
         )
-        allow, reasons = check_policy(payload.model_dump())
+        context_docs = result.get("context_docs", [])
+        context_chunks = [
+            {
+                "doc_id": str(doc.get("doc_id", "")),
+                "chunk_id": str(doc.get("chunk_id", "")),
+                "text": str(doc.get("text", doc.get("content", ""))),
+            }
+            for doc in context_docs
+        ]
+        policy_input = payload.model_dump()
+        policy_input["context_chunks"] = context_chunks
+        allow, reasons = check_policy(policy_input)
         end_span(policy_span, {"allow": allow, "reasons": reasons}, "ok")
 
         if not allow:

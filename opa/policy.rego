@@ -87,6 +87,37 @@ deny[reason] {
   reason := "Citations missing for med/high confidence"
 }
 
+# citation references unknown doc/chunk
+deny[reason] {
+  citation := input.citations[_]
+  citation.doc_id != ""
+  citation.chunk_id != ""
+  not known_chunk(citation.doc_id, citation.chunk_id)
+  reason := sprintf("Unknown citation target: %v/%v", [citation.doc_id, citation.chunk_id])
+}
+
+# quote not found in cited chunk text
+deny[reason] {
+  citation := input.citations[_]
+  known_chunk(citation.doc_id, citation.chunk_id)
+  citation.quote != ""
+  not quote_in_chunk(citation.doc_id, citation.chunk_id, citation.quote)
+  reason := sprintf("Citation quote not found in chunk: %v/%v", [citation.doc_id, citation.chunk_id])
+}
+
+known_chunk(doc_id, chunk_id) {
+  chunk := input.context_chunks[_]
+  chunk.doc_id == doc_id
+  chunk.chunk_id == chunk_id
+}
+
+quote_in_chunk(doc_id, chunk_id, quote) {
+  chunk := input.context_chunks[_]
+  chunk.doc_id == doc_id
+  chunk.chunk_id == chunk_id
+  contains(lower(chunk.text), lower(quote))
+}
+
 allow {
   count(deny) == 0
 }

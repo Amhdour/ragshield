@@ -12,10 +12,12 @@ logger = logging.getLogger(__name__)
 
 
 class Citation(BaseModel):
-    """A source citation tied to a retrieved document."""
+    """A source citation tied to a retrieved document chunk."""
 
     doc_id: str = Field(min_length=1)
+    chunk_id: str = Field(min_length=1)
     quote: str = Field(min_length=1)
+    score: float | None = None
 
 
 class AnswerPayload(BaseModel):
@@ -50,39 +52,66 @@ def _fallback_payload(reason: str) -> AnswerPayload:
     )
 
 
-def _short_quote(content: str, limit: int = 160) -> str:
-    """Create a short citation quote from a document content field."""
-    snippet = " ".join(content.split())
+def _short_quote(text: str, limit: int = 160) -> str:
+    """Create a short citation quote from a chunk text field."""
+    snippet = " ".join(text.split())
     return snippet[:limit] if snippet else "Context excerpt unavailable"
 
 
-def _context_map(context_docs: list[dict[str, str]]) -> dict[str, dict[str, str]]:
-    """Index context documents by doc_id."""
-    return {
-        str(doc.get("doc_id", "")).strip(): doc
-        for doc in context_docs
-        if str(doc.get("doc_id", "")).strip()
-    }
+def _chunk_map(context_docs: list[dict[str, str]]) -> dict[tuple[str, str], dict[str, str]]:
+    """Index context chunks by (doc_id, chunk_id)."""
+    indexed: dict[tuple[str, str], dict[str, str]] = {}
+    for doc in context_docs:
+        doc_id = str(doc.get("doc_id", "")).strip()
+        chunk_id = str(doc.get("chunk_id", "")).strip()
+        if doc_id and chunk_id:
+            indexed[(doc_id, chunk_id)] = doc
+    return indexed
 
 
 def _normalize_payload(payload: AnswerPayload, context_docs: list[dict[str, str]]) -> AnswerPayload:
-    """Ensure citations align to retrieved docs and confidence/citation invariants hold."""
-    docs_by_id = _context_map(context_docs)
+    """Ensure citations align to retrieved chunks and confidence/citation invariants hold."""
+    chunks = _chunk_map(context_docs)
 
     valid_citations: list[Citation] = []
     for citation in payload.citations:
-        if citation.doc_id not in docs_by_id:
+        key = (citation.doc_id, citation.chunk_id)
+        if key not in chunks:
             continue
-        quote = citation.quote.strip() or _short_quote(docs_by_id[citation.doc_id].get("content", ""))
-        valid_citations.append(Citation(doc_id=citation.doc_id, quote=quote))
+        chunk_text = str(chunks[key].get("text", chunks[key].get("content", "")))
+        candidate_quote = citation.quote.strip()
+        if not candidate_quote:
+            candidate_quote = _short_quote(chunk_text)
+
+        if candidate_quote.lower() not in chunk_text.lower():
+            continue
+
+        score = citation.score
+        if score is not None:
+            try:
+                score = max(0.0, min(1.0, float(score)))
+            except Exception:
+                score = None
+
+        valid_citations.append(
+            Citation(
+                doc_id=citation.doc_id,
+                chunk_id=citation.chunk_id,
+                quote=candidate_quote,
+                score=score,
+            )
+        )
 
     if payload.confidence in {"med", "high"} and not valid_citations:
-        first_doc_id = next(iter(docs_by_id.keys()), "")
-        if first_doc_id:
+        first_key = next(iter(chunks.keys()), None)
+        if first_key:
+            first_chunk = chunks[first_key]
             valid_citations = [
                 Citation(
-                    doc_id=first_doc_id,
-                    quote=_short_quote(docs_by_id[first_doc_id].get("content", "")),
+                    doc_id=first_key[0],
+                    chunk_id=first_key[1],
+                    quote=_short_quote(str(first_chunk.get("text", first_chunk.get("content", "")))),
+                    score=0.5,
                 )
             ]
         else:
@@ -109,7 +138,11 @@ def _repair_once(raw_output: str, context_docs: list[dict[str, str]]) -> str:
     from app.prompts import REPAIR_PROMPT
 
     context_lines = [
-        f"doc_id={doc.get('doc_id', '')}; content={doc.get('content', '')}"
+        (
+            f"doc_id={doc.get('doc_id', '')}; "
+            f"chunk_id={doc.get('chunk_id', '')}; "
+            f"text={doc.get('text', doc.get('content', ''))}"
+        )
         for doc in context_docs
     ]
     repair_messages = [

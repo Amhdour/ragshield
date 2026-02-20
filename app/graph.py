@@ -71,7 +71,7 @@ def draft_node(state: ChatState) -> ChatState:
             f"doc_id={doc.get('doc_id', '')}; "
             f"category={doc.get('category', '')}; "
             f"source={doc.get('source', '')}; "
-            f"content={doc.get('content', '')}"
+            f"text={doc.get('text', doc.get('content', ''))}"
         )
         for doc in state.get("context_docs", [])
     ]

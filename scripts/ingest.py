@@ -26,7 +26,18 @@ def parse_seeded_doc(path: Path) -> dict[str, str]:
         raise RuntimeError(
             f"Invalid doc format in {path}. Expected doc_id/category/source/content lines."
         )
-    return parsed
+
+    chunk_index = "0"
+    chunk_id = f"{parsed['doc_id']}:chunk-{chunk_index}"
+    text = parsed["content"]
+    return {
+        "doc_id": parsed["doc_id"],
+        "chunk_id": chunk_id,
+        "chunk_index": chunk_index,
+        "category": parsed["category"],
+        "source": parsed["source"],
+        "text": text,
+    }
 
 
 def ingest(directory: Path, weaviate_url: str, collection_name: str = COLLECTION_NAME) -> None:
@@ -58,13 +69,19 @@ def ingest(directory: Path, weaviate_url: str, collection_name: str = COLLECTION
                         name="doc_id", data_type=weaviate.classes.config.DataType.TEXT
                     ),
                     weaviate.classes.config.Property(
+                        name="chunk_id", data_type=weaviate.classes.config.DataType.TEXT
+                    ),
+                    weaviate.classes.config.Property(
+                        name="chunk_index", data_type=weaviate.classes.config.DataType.TEXT
+                    ),
+                    weaviate.classes.config.Property(
                         name="category", data_type=weaviate.classes.config.DataType.TEXT
                     ),
                     weaviate.classes.config.Property(
                         name="source", data_type=weaviate.classes.config.DataType.TEXT
                     ),
                     weaviate.classes.config.Property(
-                        name="content", data_type=weaviate.classes.config.DataType.TEXT
+                        name="text", data_type=weaviate.classes.config.DataType.TEXT
                     ),
                 ],
             )

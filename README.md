@@ -109,6 +109,20 @@ Demo notes:
 - Do **not** commit screenshots into this repository.
 
 
+
+## Auditable citations
+
+RAGShield now stores/retrieves chunk-level evidence with stable IDs:
+- `doc_id`
+- `chunk_id`
+- `chunk_index`
+- `text`
+
+Response citations use structured objects:
+- `{"doc_id": ..., "chunk_id": ..., "quote": ..., "score": ...}`
+
+OPA post-policy checks deny outputs when citations reference unknown `doc_id/chunk_id` or when a citation quote is not found in the referenced chunk text.
+
 ## Pre-action OPA gating
 
 Tools/actions currently gated before execution:
