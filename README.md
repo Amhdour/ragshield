@@ -36,6 +36,21 @@ pip install -e .
 - `OPA_URL`
 - `TOP_K` (default `5`)
 
+## One-command setup (Makefile)
+
+Common developer/demo flows are available via `make`:
+
+```bash
+make up            # start weaviate + opa
+make up-langfuse   # start full stack with langfuse profile
+make seed          # create demo docs
+make ingest        # ingest docs into weaviate
+make run           # start API
+make redteam       # run promptfoo red-team suite
+make eval          # run ragas evaluation
+make down          # stop and cleanup local services
+```
+
 ## Start local dependencies
 
 Core stack (Weaviate + OPA):
@@ -250,3 +265,11 @@ Optional flags:
 - `--timeout 20 --retries 2`
 
 The script fails fast with a helpful error if `/chat` is unreachable or if RAGAS dependencies/provider credentials are missing.
+
+
+## Templates and demo assets
+
+- Threat model template: `docs/threat_model.md`
+- Security readiness report template: `docs/security_readiness_report_template.md`
+- Evaluation scorecard template: `docs/evaluation_scorecard_template.md`
+- Live demo script (6 prompts): `docs/demo_script.md`
