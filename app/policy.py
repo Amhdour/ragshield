@@ -40,6 +40,12 @@ def _parse_reasons(result: Any) -> list[str]:
     if isinstance(result, list):
         return [str(reason) for reason in result]
     if isinstance(result, dict):
+        if "reasons" in result:
+            nested = result.get("reasons")
+            if isinstance(nested, list):
+                return [str(reason) for reason in nested]
+            if nested is not None:
+                return [str(nested)]
         return [str(reason) for reason in result.keys()]
     return [str(result)]
 
