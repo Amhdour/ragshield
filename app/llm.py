@@ -32,6 +32,21 @@ def _extract_content(response: Any) -> str:
     return str(content)
 
 
+def _is_schema_unsupported_error(exc: Exception) -> bool:
+    """Best-effort detection for provider/schema capability mismatch errors."""
+    message = str(exc).lower()
+    needles = [
+        "response_format",
+        "json_schema",
+        "invalid schema",
+        "schema is not supported",
+        "not support response format",
+        "response format is not supported",
+        "unsupported value: 'response_format'",
+    ]
+    return any(needle in message for needle in needles)
+
+
 def generate(messages: list[dict[str, Any]], request_id: str | None = None) -> str:
     """Generate a model response via LiteLLM using environment-backed config."""
     if not messages:
@@ -61,9 +76,9 @@ def generate(messages: list[dict[str, Any]], request_id: str | None = None) -> s
         request_kwargs["metadata"] = {"request_id": request_id}
 
     mode = settings.STRUCTURED_OUTPUT_MODE
-    use_json_schema = mode in {"auto", "json_schema"}
+    wants_schema = mode in {"auto", "json_schema"}
 
-    if use_json_schema:
+    if wants_schema:
         request_kwargs["response_format"] = {
             "type": "json_schema",
             "json_schema": _answer_payload_json_schema(),
@@ -71,18 +86,20 @@ def generate(messages: list[dict[str, Any]], request_id: str | None = None) -> s
 
     try:
         response = completion(**request_kwargs)
-        logger.info("structured_output_mode=%s", "json_schema" if use_json_schema else "prompt_only")
-        content = _extract_content(response)
-        return content
+        logger.info("structured_output_mode=%s", "json_schema" if wants_schema else "prompt_only")
+        return _extract_content(response)
     except Exception as exc:  # noqa: BLE001
-        if use_json_schema and mode == "auto":
-            logger.warning("structured_output_mode=prompt_only_fallback reason=%s", exc)
+        if wants_schema and _is_schema_unsupported_error(exc):
+            logger.warning(
+                "structured_output_fallback model=%s mode=prompt_only reason=unsupported_json_schema",
+                model,
+            )
             fallback_kwargs = dict(request_kwargs)
             fallback_kwargs.pop("response_format", None)
             try:
                 response = completion(**fallback_kwargs)
-                content = _extract_content(response)
-                return content
+                logger.info("structured_output_mode=prompt_only")
+                return _extract_content(response)
             except Exception as fallback_exc:  # noqa: BLE001
                 raise RuntimeError(
                     f"LiteLLM generation failed for model {model} at provider {provider}: {fallback_exc}"

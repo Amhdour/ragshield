@@ -225,16 +225,26 @@ RAGShield supports structured generation at the model layer through LiteLLM `res
 
 Modes:
 - `STRUCTURED_OUTPUT_MODE=auto` (recommended): try `json_schema`, then fallback to prompt-only JSON if unsupported by provider/model.
-- `STRUCTURED_OUTPUT_MODE=json_schema`: require OpenAI-style `response_format={"type":"json_schema"...}`; no fallback.
+- `STRUCTURED_OUTPUT_MODE=json_schema`: force schema attempt first; if rejected by provider/model, one prompt-only fallback retry is attempted.
 - `STRUCTURED_OUTPUT_MODE=prompt_only`: do not send `response_format`; rely on strict JSON prompts + validator/repair path.
 
 Known models/providers that commonly support json_schema:
 - OpenAI GPT-4.1 family
 - OpenAI GPT-4o family
+- Groq supported models (model-dependent support)
 
 Fallback behavior:
-- In `auto`, the app logs `structured_output_mode=prompt_only_fallback` when schema-mode is unsupported and continues safely.
+- In `auto` **or** `json_schema`, the app first attempts `response_format=json_schema`.
+- If provider/model rejects `response_format` or schema features, the app logs a single-line warning (`structured_output_fallback ...`) and retries once in prompt-only mode.
 - Post-validation and one repair attempt still apply as defense-in-depth.
+
+Structured output smoke check:
+
+```bash
+python scripts/structured_output_smoke.py --base-url http://localhost:8000 --log-file /tmp/uvicorn.log
+```
+
+This prints whether `/chat` returned a valid `AnswerPayload` shape and whether logs indicate `json_schema` usage or fallback.
 
 ## Tracing
 
