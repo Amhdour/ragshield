@@ -1,4 +1,12 @@
 model_list:
+  # Groq chat model routed through LiteLLM proxy
+  - model_name: groq-llama-3.1-8b-instant
+    litellm_params:
+      model: llama-3.1-8b-instant
+      api_base: https://api.groq.com/openai/v1
+      api_key: os.environ/GROQ_API_KEY
+
+  # Optional existing OpenAI example
   - model_name: gpt-4o-mini
     litellm_params:
       model: gpt-4o-mini

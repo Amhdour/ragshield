@@ -141,7 +141,7 @@ RAGShield supports split providers:
 ### Groq (chat)
 Groq exposes an OpenAI-compatible chat API. Use:
 - Base URL: `https://api.groq.com/openai/v1`
-- Set `CHAT_BASE_URL`, `CHAT_API_KEY`, and `CHAT_MODEL`
+- Set `CHAT_BASE_URL`, `CHAT_API_KEY`, and `CHAT_MODEL` (or use proxy model alias)
 
 If `CHAT_*` values are not set, the app automatically falls back to legacy `LITELLM_*` values.
 
@@ -153,6 +153,7 @@ Optional model discovery endpoint:
 - `GET https://openrouter.ai/api/v1/embeddings/models`
 
 Set `EMBEDDING_BASE_URL`, `EMBEDDING_API_KEY`, and `EMBEDDING_MODEL`.
+Embeddings are called directly against `EMBEDDING_*` provider and do **not** go through chat proxy.
 If embedding base/model are unset, embeddings are treated as disabled.
 
 ## LiteLLM proxy (gateway)
@@ -166,7 +167,9 @@ Why use it:
 
 Defaults:
 - app default `LITELLM_BASE_URL` is `http://litellm:4000` for fully dockerized networking
-- for host-local app runs, set `LITELLM_BASE_URL=http://localhost:4000` in `.env`
+- for host-local app runs, set `CHAT_BASE_URL=http://localhost:4000` (or `LITELLM_BASE_URL=http://localhost:4000` fallback)
+- set `CHAT_MODEL=groq-llama-3.1-8b-instant` to target Groq route in proxy config
+- set `GROQ_API_KEY` for the proxy upstream auth
 
 Start proxy with other core services:
 
@@ -178,6 +181,13 @@ Quick proxy health check:
 
 ```bash
 curl -sS http://localhost:4000/health/liveliness ; echo
+```
+
+Proxy usage check:
+
+```bash
+python -c "from app.config import settings; print(settings.CHAT_BASE_URL, settings.CHAT_MODEL)"
+# expected: http://localhost:4000 groq-llama-3.1-8b-instant (host-local)
 ```
 
 ## Structured output mode
