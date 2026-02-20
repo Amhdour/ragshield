@@ -111,6 +111,27 @@ curl -sS http://localhost:8000/chat \
 ```
 
 
+## Retrieval modes
+
+RAGShield supports retrieval mode selection via `RETRIEVAL_MODE`:
+
+- `bm25`: always lexical BM25 retrieval
+- `hybrid`: Weaviate hybrid query (BM25 + vector); requires embeddings config
+- `auto` (default): use `hybrid` when embeddings are available, otherwise fallback to `bm25`
+
+Examples:
+
+```bash
+RETRIEVAL_MODE=auto
+# hybrid is selected only if EMBEDDING_MODEL + EMBEDDING_API_KEY are set
+
+RETRIEVAL_MODE=bm25
+# always works (no embeddings required)
+
+RETRIEVAL_MODE=hybrid
+# requires embeddings; otherwise runtime falls back to bm25
+```
+
 ## Provider split: Groq chat + OpenRouter embeddings
 
 RAGShield supports split providers:
