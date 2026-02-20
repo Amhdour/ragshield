@@ -22,7 +22,9 @@ pip install -e .
 `app/config.py` loads the following values (see `.env.example`):
 
 - `LITELLM_BASE_URL`
-- `LITELLM_MODEL`
+- `DEFAULT_MODEL`
+- `LITELLM_MODEL` (defaults to `DEFAULT_MODEL` when unset)
+- `STRUCTURED_OUTPUT_MODE` (`auto` | `json_schema` | `prompt_only`)
 - `LITELLM_API_KEY` (optional)
 - `WEAVIATE_URL`
 - `LANGFUSE_PUBLIC_KEY` (optional)
@@ -77,6 +79,24 @@ curl -sS http://localhost:8000/chat \
   -H "Content-Type: application/json" \
   -d '{"query":"What docs exist?"}' ; echo
 ```
+
+
+## Structured output mode
+
+RAGShield supports structured generation at the model layer through LiteLLM `response_format`.
+
+Modes:
+- `STRUCTURED_OUTPUT_MODE=auto` (recommended): try `json_schema`, then fallback to prompt-only JSON if unsupported by provider/model.
+- `STRUCTURED_OUTPUT_MODE=json_schema`: require OpenAI-style `response_format={"type":"json_schema"...}`; no fallback.
+- `STRUCTURED_OUTPUT_MODE=prompt_only`: do not send `response_format`; rely on strict JSON prompts + validator/repair path.
+
+Known models/providers that commonly support json_schema:
+- OpenAI GPT-4.1 family
+- OpenAI GPT-4o family
+
+Fallback behavior:
+- In `auto`, the app logs `structured_output_mode=prompt_only_fallback` when schema-mode is unsupported and continues safely.
+- Post-validation and one repair attempt still apply as defense-in-depth.
 
 ## Tracing
 

@@ -43,7 +43,9 @@ class Settings:
     """Typed application settings loaded from environment variables."""
 
     LITELLM_BASE_URL: str
+    DEFAULT_MODEL: str
     LITELLM_MODEL: str
+    STRUCTURED_OUTPUT_MODE: str
     LITELLM_API_KEY: str | None
     WEAVIATE_URL: str
     LANGFUSE_PUBLIC_KEY: str | None
@@ -63,6 +65,16 @@ class Settings:
     def litellm_model(self) -> str:
         """Backwards-compatible lowercase accessor."""
         return self.LITELLM_MODEL
+
+    @property
+    def default_model(self) -> str:
+        """Backwards-compatible lowercase accessor."""
+        return self.DEFAULT_MODEL
+
+    @property
+    def structured_output_mode(self) -> str:
+        """Backwards-compatible lowercase accessor."""
+        return self.STRUCTURED_OUTPUT_MODE
 
     @property
     def openai_api_key(self) -> str | None:
@@ -116,9 +128,19 @@ def load_settings() -> Settings:
     if top_k < 1:
         raise ValueError(f"Invalid TOP_K: {top_k}. Expected integer >= 1.")
 
-    litellm_model = os.getenv("LITELLM_MODEL", "gpt-4o-mini").strip()
+    default_model = (os.getenv("DEFAULT_MODEL", "gpt-4o-mini") or "gpt-4o-mini").strip()
+    if not default_model:
+        raise ValueError("Invalid DEFAULT_MODEL: value cannot be empty.")
+
+    litellm_model = (os.getenv("LITELLM_MODEL") or default_model).strip()
     if not litellm_model:
         raise ValueError("Invalid LITELLM_MODEL: value cannot be empty.")
+
+    structured_output_mode = (os.getenv("STRUCTURED_OUTPUT_MODE", "auto") or "auto").strip().lower()
+    if structured_output_mode not in {"auto", "json_schema", "prompt_only"}:
+        raise ValueError(
+            "Invalid STRUCTURED_OUTPUT_MODE: expected one of 'auto', 'json_schema', 'prompt_only'."
+        )
 
     ragshield_env = (os.getenv("RAGSHIELD_ENV", "dev") or "dev").strip().lower()
     if ragshield_env not in {"dev", "prod"}:
@@ -133,7 +155,9 @@ def load_settings() -> Settings:
         LITELLM_BASE_URL=_require_http_url(
             "LITELLM_BASE_URL", os.getenv("LITELLM_BASE_URL", "http://localhost:4000")
         ),
+        DEFAULT_MODEL=default_model,
         LITELLM_MODEL=litellm_model,
+        STRUCTURED_OUTPUT_MODE=structured_output_mode,
         LITELLM_API_KEY=os.getenv("LITELLM_API_KEY") or None,
         WEAVIATE_URL=_require_http_url(
             "WEAVIATE_URL", os.getenv("WEAVIATE_URL", "http://localhost:8080")
