@@ -187,17 +187,27 @@ bash redteam/run_promptfoo.sh
 Artifacts are written under `redteam/results/`.
 
 
-## CI
+## CI Gates
 
 GitHub Actions runs `.github/workflows/ci.yml` on every pull request.
 
-What it does:
+### `redteam-gate`
 - installs Python + Node dependencies
-- starts Weaviate + OPA with Docker Compose
+- starts Weaviate + OPA via Docker Compose
 - seeds + ingests docs
-- runs a Python smoke check (`py_compile` + `import app.main`)
-- runs `promptfoo eval -c redteam/promptfoo.yaml` when `OPENAI_API_KEY` secret is available
+- runs Python smoke checks (`py_compile` + `import app.main`)
+- runs `promptfoo eval -c redteam/promptfoo.yaml` when `OPENAI_API_KEY` is available
 - skips promptfoo with a clear message when the secret is unavailable (e.g., fork PRs)
+
+### `ragas-gate`
+- runs only when `OPENAI_API_KEY` is available
+- starts Weaviate + OPA via Docker Compose
+- seeds + ingests docs
+- starts the API and runs `python eval/run_ragas.py --base-url http://localhost:8000`
+- always uploads `eval/report.json` and `eval/report.md` as artifacts
+- enforces quality thresholds from `eval/report.json`:
+  - `faithfulness_mean` (fallback: `faithfulness`) must be `>= 0.70`
+  - `answer_relevancy_mean` (fallback: `answer_relevancy`) must be `>= 0.70`
 
 Local reproduction:
 
@@ -209,8 +219,19 @@ python scripts/seed_test_docs.py
 python scripts/ingest.py --input-dir ./data/docs --weaviate-url http://localhost:8080 --collection RagDoc
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 promptfoo eval -c redteam/promptfoo.yaml
+python eval/run_ragas.py --base-url http://localhost:8000
+python - <<'PY2'
+import json
+from pathlib import Path
+payload = json.loads(Path('eval/report.json').read_text())
+avg = payload.get('averages', {})
+faith = float(avg.get('faithfulness_mean', avg.get('faithfulness', 0.0)))
+arel = float(avg.get('answer_relevancy_mean', avg.get('answer_relevancy', 0.0)))
+assert faith >= 0.70, faith
+assert arel >= 0.70, arel
+print('RAGAS thresholds passed')
+PY2
 ```
-
 
 ## Evaluation
 

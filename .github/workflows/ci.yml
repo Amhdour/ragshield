@@ -102,8 +102,139 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: uvicorn-log
+          name: uvicorn-log-redteam
           path: /tmp/uvicorn.log
+
+      - name: Teardown services
+        if: always()
+        run: docker compose down -v
+
+  ragas-gate:
+    if: ${{ secrets.OPENAI_API_KEY != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      LITELLM_BASE_URL: https://api.openai.com/v1
+      LITELLM_MODEL: gpt-4o-mini
+      LITELLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      WEAVIATE_URL: http://localhost:8080
+      OPA_URL: http://localhost:8181
+      TOP_K: "5"
+      LANGFUSE_PUBLIC_KEY: ""
+      LANGFUSE_SECRET_KEY: ""
+      LANGFUSE_HOST: ""
+      RAGSHIELD_ENV: dev
+      DEBUG_TRACE: "false"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: Start required services
+        run: docker compose up -d weaviate opa
+
+      - name: Wait for Weaviate and OPA health
+        run: |
+          for i in {1..60}; do
+            if curl -fsS http://localhost:8080/v1/.well-known/ready >/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          curl -fsS http://localhost:8080/v1/.well-known/ready >/dev/null
+
+          for i in {1..60}; do
+            if curl -fsS http://localhost:8181/health >/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          curl -fsS http://localhost:8181/health >/dev/null
+
+      - name: Seed and ingest docs
+        run: |
+          python scripts/seed_test_docs.py
+          python scripts/ingest.py --input-dir ./data/docs --weaviate-url http://localhost:8080 --collection RagDoc
+
+      - name: Start API
+        run: |
+          nohup uvicorn app.main:app --host 0.0.0.0 --port 8000 >/tmp/uvicorn-ragas.log 2>&1 &
+          for i in {1..60}; do
+            if curl -fsS http://localhost:8000/chat -H 'Content-Type: application/json' -d '{"query":"health"}' >/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          curl -fsS http://localhost:8000/chat -H 'Content-Type: application/json' -d '{"query":"health"}' >/dev/null
+
+      - name: Run RAGAS evaluation
+        run: python eval/run_ragas.py --base-url http://localhost:8000
+
+      - name: Enforce RAGAS thresholds
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          report = Path("eval/report.json")
+          if not report.exists():
+              raise SystemExit("Missing eval/report.json")
+
+          data = json.loads(report.read_text(encoding="utf-8"))
+          averages = data.get("averages", {}) if isinstance(data, dict) else {}
+
+          faithfulness = averages.get("faithfulness_mean", averages.get("faithfulness", 0.0))
+          answer_relevancy = averages.get("answer_relevancy_mean", averages.get("answer_relevancy", 0.0))
+
+          faithfulness = float(faithfulness)
+          answer_relevancy = float(answer_relevancy)
+
+          threshold_faithfulness = 0.70
+          threshold_answer_relevancy = 0.70
+
+          print(f"faithfulness={faithfulness:.4f} (threshold {threshold_faithfulness:.2f})")
+          print(f"answer_relevancy={answer_relevancy:.4f} (threshold {threshold_answer_relevancy:.2f})")
+
+          failures = []
+          if faithfulness < threshold_faithfulness:
+              failures.append(
+                  f"faithfulness below threshold: {faithfulness:.4f} < {threshold_faithfulness:.2f}"
+              )
+          if answer_relevancy < threshold_answer_relevancy:
+              failures.append(
+                  "answer_relevancy below threshold: "
+                  f"{answer_relevancy:.4f} < {threshold_answer_relevancy:.2f}"
+              )
+
+          if failures:
+              raise SystemExit("; ".join(failures))
+          PY
+
+      - name: Upload RAGAS artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ragas-report
+          path: |
+            eval/report.json
+            eval/report.md
+
+      - name: Upload app logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uvicorn-log-ragas
+          path: /tmp/uvicorn-ragas.log
 
       - name: Teardown services
         if: always()
