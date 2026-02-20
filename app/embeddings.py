@@ -1,4 +1,4 @@
-"""Embedding helpers backed by LiteLLM."""
+"""Embedding helpers backed by LiteLLM-compatible embedding providers."""
 
 from __future__ import annotations
 
@@ -8,9 +8,14 @@ from app.config import settings
 
 
 def embed_texts(texts: list[str]) -> list[list[float]]:
-    """Embed input texts using LiteLLM and return vectors in input order."""
+    """Embed input texts using configured embedding provider and return vectors in input order."""
     if not texts:
         return []
+
+    if not settings.embeddings_enabled:
+        raise RuntimeError(
+            "Embedding failed: embeddings are disabled because EMBEDDING_BASE_URL/EMBEDDING_MODEL are unset."
+        )
 
     cleaned = [t.strip() for t in texts]
     if any(not t for t in cleaned):
@@ -26,16 +31,16 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
     request_kwargs: dict[str, Any] = {
         "model": settings.EMBEDDING_MODEL,
         "input": cleaned,
-        "api_base": settings.LITELLM_BASE_URL,
+        "api_base": settings.EMBEDDING_BASE_URL,
     }
-    if settings.LITELLM_API_KEY:
-        request_kwargs["api_key"] = settings.LITELLM_API_KEY
+    if settings.EMBEDDING_API_KEY:
+        request_kwargs["api_key"] = settings.EMBEDDING_API_KEY
 
     try:
         response = embedding(**request_kwargs)
     except Exception as exc:  # noqa: BLE001
         raise RuntimeError(
-            f"Embedding failed for model {settings.EMBEDDING_MODEL} at {settings.LITELLM_BASE_URL}: {exc}"
+            f"Embedding failed for model {settings.EMBEDDING_MODEL} at {settings.EMBEDDING_BASE_URL}: {exc}"
         ) from exc
 
     data = getattr(response, "data", None)

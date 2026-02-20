@@ -39,8 +39,8 @@ def generate(messages: list[dict[str, Any]], request_id: str | None = None) -> s
             "LiteLLM generation failed for model unknown at provider unknown: messages cannot be empty."
         )
 
-    provider = settings.LITELLM_BASE_URL
-    model = settings.LITELLM_MODEL or settings.DEFAULT_MODEL
+    provider = settings.CHAT_BASE_URL
+    model = settings.CHAT_MODEL or settings.LITELLM_MODEL or settings.DEFAULT_MODEL
 
     try:
         from litellm import completion
@@ -55,8 +55,8 @@ def generate(messages: list[dict[str, Any]], request_id: str | None = None) -> s
         "messages": messages,
         "api_base": provider,
     }
-    if settings.LITELLM_API_KEY:
-        request_kwargs["api_key"] = settings.LITELLM_API_KEY
+    if settings.CHAT_API_KEY:
+        request_kwargs["api_key"] = settings.CHAT_API_KEY
     if request_id:
         request_kwargs["metadata"] = {"request_id": request_id}
 

@@ -46,8 +46,14 @@ class Settings:
     DEFAULT_MODEL: str
     LITELLM_MODEL: str
     STRUCTURED_OUTPUT_MODE: str
-    EMBEDDING_MODEL: str
+    EMBEDDING_MODEL: str | None
     LITELLM_API_KEY: str | None
+    CHAT_BASE_URL: str
+    CHAT_MODEL: str
+    CHAT_API_KEY: str | None
+    EMBEDDING_BASE_URL: str | None
+    EMBEDDING_API_KEY: str | None
+    RETRIEVAL_MODE: str
     WEAVIATE_URL: str
     LANGFUSE_PUBLIC_KEY: str | None
     LANGFUSE_SECRET_KEY: str | None
@@ -78,7 +84,7 @@ class Settings:
         return self.STRUCTURED_OUTPUT_MODE
 
     @property
-    def embedding_model(self) -> str:
+    def embedding_model(self) -> str | None:
         """Backwards-compatible lowercase accessor."""
         return self.EMBEDDING_MODEL
 
@@ -122,6 +128,11 @@ class Settings:
         """Backwards-compatible lowercase accessor."""
         return self.DEBUG_TRACE
 
+    @property
+    def embeddings_enabled(self) -> bool:
+        """Whether embedding provider config is fully present."""
+        return bool(self.EMBEDDING_BASE_URL and self.EMBEDDING_MODEL)
+
 
 def load_settings() -> Settings:
     """Load settings from env vars with defaults and validation."""
@@ -142,15 +153,37 @@ def load_settings() -> Settings:
     if not litellm_model:
         raise ValueError("Invalid LITELLM_MODEL: value cannot be empty.")
 
+    litellm_base_url = _require_http_url(
+        "LITELLM_BASE_URL", os.getenv("LITELLM_BASE_URL", "http://litellm:4000")
+    )
+    litellm_api_key = os.getenv("LITELLM_API_KEY") or None
+
+    chat_base_url = _require_http_url("CHAT_BASE_URL", os.getenv("CHAT_BASE_URL") or litellm_base_url)
+    chat_model = (os.getenv("CHAT_MODEL") or litellm_model).strip()
+    if not chat_model:
+        raise ValueError("Invalid CHAT_MODEL: value cannot be empty.")
+    chat_api_key = os.getenv("CHAT_API_KEY") or litellm_api_key
+
+    embedding_model_raw = (os.getenv("EMBEDDING_MODEL") or "").strip() or None
+    embedding_base_raw = (os.getenv("EMBEDDING_BASE_URL") or "").strip() or None
+    embedding_api_key = os.getenv("EMBEDDING_API_KEY") or litellm_api_key
+
+    # Backward compatibility: if model is provided but EMBEDDING_BASE_URL is unset,
+    # use existing LITELLM_BASE_URL. If both EMBEDDING_* are unset, embeddings are disabled.
+    if embedding_model_raw and not embedding_base_raw:
+        embedding_base_raw = litellm_base_url
+
+    embedding_base_url = _optional_http_url("EMBEDDING_BASE_URL", embedding_base_raw)
+
     structured_output_mode = (os.getenv("STRUCTURED_OUTPUT_MODE", "auto") or "auto").strip().lower()
     if structured_output_mode not in {"auto", "json_schema", "prompt_only"}:
         raise ValueError(
             "Invalid STRUCTURED_OUTPUT_MODE: expected one of 'auto', 'json_schema', 'prompt_only'."
         )
 
-    embedding_model = (os.getenv("EMBEDDING_MODEL", "text-embedding-3-small") or "text-embedding-3-small").strip()
-    if not embedding_model:
-        raise ValueError("Invalid EMBEDDING_MODEL: value cannot be empty.")
+    retrieval_mode = (os.getenv("RETRIEVAL_MODE", "auto") or "auto").strip().lower()
+    if retrieval_mode not in {"auto", "bm25", "hybrid", "vector"}:
+        raise ValueError("Invalid RETRIEVAL_MODE: expected one of 'auto', 'bm25', 'hybrid', 'vector'.")
 
     ragshield_env = (os.getenv("RAGSHIELD_ENV", "dev") or "dev").strip().lower()
     if ragshield_env not in {"dev", "prod"}:
@@ -162,14 +195,18 @@ def load_settings() -> Settings:
     debug_trace = debug_trace_raw in {"1", "true", "yes"}
 
     return Settings(
-        LITELLM_BASE_URL=_require_http_url(
-            "LITELLM_BASE_URL", os.getenv("LITELLM_BASE_URL", "http://litellm:4000")
-        ),
+        LITELLM_BASE_URL=litellm_base_url,
         DEFAULT_MODEL=default_model,
         LITELLM_MODEL=litellm_model,
         STRUCTURED_OUTPUT_MODE=structured_output_mode,
-        EMBEDDING_MODEL=embedding_model,
-        LITELLM_API_KEY=os.getenv("LITELLM_API_KEY") or None,
+        EMBEDDING_MODEL=embedding_model_raw,
+        LITELLM_API_KEY=litellm_api_key,
+        CHAT_BASE_URL=chat_base_url,
+        CHAT_MODEL=chat_model,
+        CHAT_API_KEY=chat_api_key,
+        EMBEDDING_BASE_URL=embedding_base_url,
+        EMBEDDING_API_KEY=embedding_api_key,
+        RETRIEVAL_MODE=retrieval_mode,
         WEAVIATE_URL=_require_http_url(
             "WEAVIATE_URL", os.getenv("WEAVIATE_URL", "http://localhost:8080")
         ),

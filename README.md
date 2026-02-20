@@ -21,12 +21,18 @@ pip install -e .
 
 `app/config.py` loads the following values (see `.env.example`):
 
-- `LITELLM_BASE_URL`
+- `LITELLM_BASE_URL` (legacy fallback base URL)
 - `DEFAULT_MODEL`
-- `LITELLM_MODEL` (defaults to `DEFAULT_MODEL` when unset)
+- `LITELLM_MODEL` (legacy fallback model; defaults to `DEFAULT_MODEL`)
+- `LITELLM_API_KEY` (legacy fallback key)
+- `CHAT_BASE_URL` (optional; falls back to `LITELLM_BASE_URL`)
+- `CHAT_MODEL` (optional; falls back to `LITELLM_MODEL`)
+- `CHAT_API_KEY` (optional; falls back to `LITELLM_API_KEY`)
+- `EMBEDDING_BASE_URL` (optional; embeddings disabled unless both base URL and model are set)
+- `EMBEDDING_MODEL` (optional; embeddings disabled unless both model and base URL are set)
+- `EMBEDDING_API_KEY` (optional; falls back to `LITELLM_API_KEY`)
 - `STRUCTURED_OUTPUT_MODE` (`auto` | `json_schema` | `prompt_only`)
-- `EMBEDDING_MODEL` (default `text-embedding-3-small`)
-- `LITELLM_API_KEY` (optional)
+- `RETRIEVAL_MODE` (`auto` | `bm25` | `hybrid` | `vector`)
 - `WEAVIATE_URL`
 - `LANGFUSE_PUBLIC_KEY` (optional)
 - `LANGFUSE_SECRET_KEY` (optional)
@@ -104,6 +110,29 @@ curl -sS http://localhost:8000/chat \
   -d '{"query":"What docs exist?"}' ; echo
 ```
 
+
+## Provider split: Groq chat + OpenRouter embeddings
+
+RAGShield supports split providers:
+- **Chat provider** via OpenAI-compatible endpoint (e.g., Groq)
+- **Embedding provider** via an embedding endpoint (e.g., OpenRouter)
+
+### Groq (chat)
+Groq exposes an OpenAI-compatible chat API. Use:
+- Base URL: `https://api.groq.com/openai/v1`
+- Set `CHAT_BASE_URL`, `CHAT_API_KEY`, and `CHAT_MODEL`
+
+If `CHAT_*` values are not set, the app automatically falls back to legacy `LITELLM_*` values.
+
+### OpenRouter (embeddings)
+OpenRouter embeddings endpoint:
+- `POST https://openrouter.ai/api/v1/embeddings`
+
+Optional model discovery endpoint:
+- `GET https://openrouter.ai/api/v1/embeddings/models`
+
+Set `EMBEDDING_BASE_URL`, `EMBEDDING_API_KEY`, and `EMBEDDING_MODEL`.
+If embedding base/model are unset, embeddings are treated as disabled.
 
 ## LiteLLM proxy (gateway)
 

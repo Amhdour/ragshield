@@ -95,7 +95,7 @@ def ingest(
         except Exception as exc:  # noqa: BLE001
             raise RuntimeError(
                 f"Embedding generation failed: {exc}. "
-                "Set LITELLM_API_KEY/EMBEDDING_MODEL correctly or run with --no-embeddings for BM25-only mode."
+                "Set EMBEDDING_BASE_URL/EMBEDDING_MODEL/EMBEDDING_API_KEY (or legacy LITELLM_* vars) correctly, or run with --no-embeddings for BM25-only mode."
             ) from exc
 
     try:
