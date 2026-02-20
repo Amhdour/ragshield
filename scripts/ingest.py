@@ -8,6 +8,8 @@ from urllib.parse import urlparse
 
 import weaviate
 
+from app.config import settings
+
 COLLECTION_NAME = "RagDoc"
 
 
@@ -89,8 +91,9 @@ def ingest(
     vectors: list[list[float]] | None = None
     if use_embeddings:
         try:
-            from app.embeddings import embed_texts
+            from app.embeddings import embed_texts, validate_embedding_model_id
 
+            validate_embedding_model_id(str(settings.EMBEDDING_MODEL or ""))
             vectors = embed_texts([str(record["text"]) for record in chunk_records])
         except Exception as exc:  # noqa: BLE001
             raise RuntimeError(

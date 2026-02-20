@@ -7,6 +7,17 @@ from typing import Any
 from app.config import settings
 
 
+def validate_embedding_model_id(model_id: str) -> None:
+    """Validate embedding model id conventions for known providers."""
+    base_url = (settings.EMBEDDING_BASE_URL or "").lower()
+    if "openrouter.ai" in base_url and "/" not in model_id:
+        raise RuntimeError(
+            "Invalid EMBEDDING_MODEL for OpenRouter. OpenRouter model IDs are typically "
+            "namespaced like provider/model. Run scripts/check_openrouter_embeddings_models.py "
+            "to pick a valid id."
+        )
+
+
 def _extract_vector(item: Any) -> list[float] | None:
     """Extract embedding vector from dict/object payloads robustly."""
     if isinstance(item, dict):
@@ -31,6 +42,8 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
             "Embedding failed: EMBEDDING_BASE_URL and EMBEDDING_MODEL must both be set. "
             "Configure EMBEDDING_* vars (for example OpenRouter) or run ingest with --no-embeddings for BM25-only mode."
         )
+
+    validate_embedding_model_id(str(settings.EMBEDDING_MODEL))
 
     cleaned = [t.strip() for t in texts]
     if any(not t for t in cleaned):

@@ -8,8 +8,10 @@ from fastapi import FastAPI, Header
 from pydantic import BaseModel, Field
 
 from app.config import settings
+from app.embeddings import validate_embedding_model_id
 from app.graph import build_chat_graph
 from app.policy import check_policy, check_pre_action_policy
+from app.retrieval import embeddings_available
 from app.schema import AnswerPayload
 from app.tracing import end_span, end_trace, start_span, start_trace
 
@@ -39,11 +41,17 @@ def _normalize_role(value: str | None) -> str:
 
 @app.on_event("startup")
 def startup_log() -> None:
-    """Log tracing backend mode once at startup."""
+    """Log tracing backend mode once at startup and validate hybrid embedding config."""
     if settings.LANGFUSE_PUBLIC_KEY and settings.LANGFUSE_SECRET_KEY and settings.LANGFUSE_HOST:
         print("Langfuse enabled")
     else:
         print("Local tracing enabled")
+
+    should_use_hybrid = settings.RETRIEVAL_MODE == "hybrid" or (
+        settings.RETRIEVAL_MODE == "auto" and embeddings_available()
+    )
+    if should_use_hybrid and settings.EMBEDDING_MODEL:
+        validate_embedding_model_id(settings.EMBEDDING_MODEL)
 
 
 @app.post("/chat", response_model=ChatResponse)

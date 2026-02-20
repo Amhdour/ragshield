@@ -156,6 +156,13 @@ Set `EMBEDDING_BASE_URL`, `EMBEDDING_API_KEY`, and `EMBEDDING_MODEL`.
 Embeddings are called directly against `EMBEDDING_*` provider and do **not** go through chat proxy.
 If embedding base/model are unset, embeddings are treated as disabled.
 
+Before choosing `EMBEDDING_MODEL` on OpenRouter, list available IDs:
+
+```bash
+python scripts/check_openrouter_embeddings_models.py --contains "embedding"
+python scripts/check_openrouter_embeddings_models.py --contains "openai"
+```
+
 ## LiteLLM proxy (gateway)
 
 This repo includes a `litellm` proxy service in Docker Compose using `litellm_config.yaml`.
