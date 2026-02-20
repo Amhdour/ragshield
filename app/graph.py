@@ -21,7 +21,7 @@ class ChatState(TypedDict, total=False):
 
     query: str
     trace: TraceHandle
-    context_docs: list[dict[str, str]]
+    context_docs: list[dict[str, object]]
     draft_answer: str
     answer_payload: dict[str, object]
     pre_action_denied: list[str]
@@ -69,6 +69,10 @@ def draft_node(state: ChatState) -> ChatState:
         (
             f"evidence_id={doc.get('doc_id', '')}; "
             f"doc_id={doc.get('doc_id', '')}; "
+            f"chunk_id={doc.get('chunk_id', '')}; "
+            f"chunk_index={doc.get('chunk_index', '')}; "
+            f"start_char={doc.get('start_char', '')}; "
+            f"end_char={doc.get('end_char', '')}; "
             f"category={doc.get('category', '')}; "
             f"source={doc.get('source', '')}; "
             f"text={doc.get('text', doc.get('content', ''))}"

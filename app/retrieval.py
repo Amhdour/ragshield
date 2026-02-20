@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Any
 from urllib.parse import urlparse
 
 import weaviate
@@ -9,7 +10,17 @@ import weaviate
 from app.config import settings
 
 
-def retrieve(query: str, top_k: int) -> list[dict[str, str]]:
+def _to_int(value: Any) -> int | None:
+    """Best-effort int coercion for metadata fields."""
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def retrieve(query: str, top_k: int) -> list[dict[str, str | int | None]]:
     """Retrieve matching document chunks from RagDoc by BM25 query."""
     endpoint = urlparse(settings.WEAVIATE_URL)
     if not endpoint.hostname:
@@ -29,7 +40,7 @@ def retrieve(query: str, top_k: int) -> list[dict[str, str]]:
         ) as client:
             collection = client.collections.get("RagDoc")
             response = collection.query.bm25(query=query, limit=top_k)
-            docs: list[dict[str, str]] = []
+            docs: list[dict[str, str | int | None]] = []
             for obj in response.objects:
                 props = obj.properties
                 text = str(props.get("text", ""))
@@ -37,7 +48,9 @@ def retrieve(query: str, top_k: int) -> list[dict[str, str]]:
                     {
                         "doc_id": str(props.get("doc_id", "")),
                         "chunk_id": str(props.get("chunk_id", "")),
-                        "chunk_index": str(props.get("chunk_index", "")),
+                        "chunk_index": _to_int(props.get("chunk_index")),
+                        "start_char": _to_int(props.get("start_char")),
+                        "end_char": _to_int(props.get("end_char")),
                         "category": str(props.get("category", "")),
                         "source": str(props.get("source", "")),
                         "text": text,

@@ -61,6 +61,9 @@ def chat(request: ChatRequest) -> ChatResponse:
             {
                 "doc_id": str(doc.get("doc_id", "")),
                 "chunk_id": str(doc.get("chunk_id", "")),
+                "chunk_index": str(doc.get("chunk_index", "")),
+                "start_char": str(doc.get("start_char", "")),
+                "end_char": str(doc.get("end_char", "")),
                 "text": str(doc.get("text", doc.get("content", ""))),
             }
             for doc in context_docs

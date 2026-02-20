@@ -16,6 +16,9 @@ class Citation(BaseModel):
 
     doc_id: str = Field(min_length=1)
     chunk_id: str = Field(min_length=1)
+    chunk_index: int | None = None
+    start_char: int | None = None
+    end_char: int | None = None
     quote: str = Field(min_length=1)
     score: float | None = None
 
@@ -52,15 +55,11 @@ def _fallback_payload(reason: str) -> AnswerPayload:
     )
 
 
-def _short_quote(text: str, limit: int = 160) -> str:
-    """Create a short citation quote from a chunk text field."""
-    snippet = " ".join(text.split())
-    return snippet[:limit] if snippet else "Context excerpt unavailable"
-
-
-def _chunk_map(context_docs: list[dict[str, str]]) -> dict[tuple[str, str], dict[str, str]]:
+def _chunk_map(
+    context_docs: list[dict[str, str | int | None]],
+) -> dict[tuple[str, str], dict[str, str | int | None]]:
     """Index context chunks by (doc_id, chunk_id)."""
-    indexed: dict[tuple[str, str], dict[str, str]] = {}
+    indexed: dict[tuple[str, str], dict[str, str | int | None]] = {}
     for doc in context_docs:
         doc_id = str(doc.get("doc_id", "")).strip()
         chunk_id = str(doc.get("chunk_id", "")).strip()
@@ -69,21 +68,66 @@ def _chunk_map(context_docs: list[dict[str, str]]) -> dict[tuple[str, str], dict
     return indexed
 
 
-def _normalize_payload(payload: AnswerPayload, context_docs: list[dict[str, str]]) -> AnswerPayload:
-    """Ensure citations align to retrieved chunks and confidence/citation invariants hold."""
+def _coerce_int(value: Any) -> int | None:
+    """Best-effort int parsing from citation/context metadata values."""
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _metadata_matches(citation: Citation, chunk: dict[str, str | int | None]) -> bool:
+    """Validate optional citation metadata against chunk metadata when present."""
+    expected_chunk_index = _coerce_int(chunk.get("chunk_index"))
+    if citation.chunk_index is not None and citation.chunk_index != expected_chunk_index:
+        return False
+
+    expected_start = _coerce_int(chunk.get("start_char"))
+    if citation.start_char is not None and citation.start_char != expected_start:
+        return False
+
+    expected_end = _coerce_int(chunk.get("end_char"))
+    if citation.end_char is not None and citation.end_char != expected_end:
+        return False
+
+    return True
+
+
+def _degrade_confidence(confidence: Literal["low", "med", "high"]) -> Literal["low", "med", "high"]:
+    """Step confidence down by one tier."""
+    if confidence == "high":
+        return "med"
+    if confidence == "med":
+        return "low"
+    return "low"
+
+
+def _normalize_payload(
+    payload: AnswerPayload,
+    context_docs: list[dict[str, str | int | None]],
+) -> AnswerPayload:
+    """Keep only auditable citations and adjust confidence when citations are invalid."""
     chunks = _chunk_map(context_docs)
 
     valid_citations: list[Citation] = []
+    invalid_count = 0
     for citation in payload.citations:
         key = (citation.doc_id, citation.chunk_id)
-        if key not in chunks:
+        chunk = chunks.get(key)
+        if chunk is None:
+            invalid_count += 1
             continue
-        chunk_text = str(chunks[key].get("text", chunks[key].get("content", "")))
-        candidate_quote = citation.quote.strip()
-        if not candidate_quote:
-            candidate_quote = _short_quote(chunk_text)
 
-        if candidate_quote.lower() not in chunk_text.lower():
+        if not _metadata_matches(citation, chunk):
+            invalid_count += 1
+            continue
+
+        chunk_text = str(chunk.get("text", chunk.get("content", "")))
+        candidate_quote = citation.quote.strip()
+        if not candidate_quote or candidate_quote not in chunk_text:
+            invalid_count += 1
             continue
 
         score = citation.score
@@ -97,42 +141,43 @@ def _normalize_payload(payload: AnswerPayload, context_docs: list[dict[str, str]
             Citation(
                 doc_id=citation.doc_id,
                 chunk_id=citation.chunk_id,
+                chunk_index=_coerce_int(chunk.get("chunk_index")),
+                start_char=_coerce_int(chunk.get("start_char")),
+                end_char=_coerce_int(chunk.get("end_char")),
                 quote=candidate_quote,
                 score=score,
             )
         )
 
-    if payload.confidence in {"med", "high"} and not valid_citations:
-        first_key = next(iter(chunks.keys()), None)
-        if first_key:
-            first_chunk = chunks[first_key]
-            valid_citations = [
-                Citation(
-                    doc_id=first_key[0],
-                    chunk_id=first_key[1],
-                    quote=_short_quote(str(first_chunk.get("text", first_chunk.get("content", "")))),
-                    score=0.5,
-                )
-            ]
-        else:
-            return _fallback_payload("No valid citations for med/high confidence")
+    normalized_confidence = payload.confidence
+    if invalid_count > 0:
+        normalized_confidence = _degrade_confidence(normalized_confidence)
+    if normalized_confidence in {"med", "high"} and not valid_citations:
+        normalized_confidence = "low"
+
+    refusal_reason = payload.refusal_reason
+    if invalid_count > 0 and normalized_confidence == "low" and not refusal_reason:
+        refusal_reason = "Dropped invalid citations during validation"
 
     return AnswerPayload(
         answer=payload.answer,
         citations=valid_citations,
-        confidence=payload.confidence,
-        refusal_reason=payload.refusal_reason,
+        confidence=normalized_confidence,
+        refusal_reason=refusal_reason,
     )
 
 
-def _parse_and_validate(candidate: str, context_docs: list[dict[str, str]]) -> AnswerPayload:
+def _parse_and_validate(
+    candidate: str,
+    context_docs: list[dict[str, str | int | None]],
+) -> AnswerPayload:
     """Parse JSON candidate and validate it against `AnswerPayload`."""
     parsed: Any = json.loads(candidate)
     payload = AnswerPayload.model_validate(parsed)
     return _normalize_payload(payload, context_docs)
 
 
-def _repair_once(raw_output: str, context_docs: list[dict[str, str]]) -> str:
+def _repair_once(raw_output: str, context_docs: list[dict[str, str | int | None]]) -> str:
     """Attempt one model-assisted repair to strict JSON output."""
     from app.llm import generate
     from app.prompts import REPAIR_PROMPT
@@ -141,6 +186,9 @@ def _repair_once(raw_output: str, context_docs: list[dict[str, str]]) -> str:
         (
             f"doc_id={doc.get('doc_id', '')}; "
             f"chunk_id={doc.get('chunk_id', '')}; "
+            f"chunk_index={doc.get('chunk_index', '')}; "
+            f"start_char={doc.get('start_char', '')}; "
+            f"end_char={doc.get('end_char', '')}; "
             f"text={doc.get('text', doc.get('content', ''))}"
         )
         for doc in context_docs
@@ -159,20 +207,21 @@ def _repair_once(raw_output: str, context_docs: list[dict[str, str]]) -> str:
     return generate(messages=repair_messages)
 
 
-def validate_or_repair_output(raw_output: str, context_docs: list[dict[str, str]]) -> AnswerPayload:
+def validate_or_repair_output(
+    raw_output: str,
+    context_docs: list[dict[str, str | int | None]],
+) -> AnswerPayload:
     """Validate JSON output; attempt one repair; fallback safely on failure."""
     if not context_docs:
         return _fallback_payload("No relevant context retrieved")
 
     candidate = _extract_json_candidate(raw_output)
 
-    # Parse/validate first.
     try:
         return _parse_and_validate(candidate, context_docs)
     except (json.JSONDecodeError, ValidationError, TypeError):
         pass
 
-    # Optional Guardrails path, if available.
     try:
         from guardrails import Guard  # type: ignore
 
@@ -185,7 +234,6 @@ def validate_or_repair_output(raw_output: str, context_docs: list[dict[str, str]
     except Exception:
         pass
 
-    # One repair attempt with the model.
     try:
         repaired_raw = _repair_once(raw_output=raw_output, context_docs=context_docs)
         repaired_candidate = _extract_json_candidate(repaired_raw)

@@ -29,32 +29,36 @@ def parse_seeded_doc(path: Path) -> dict[str, str]:
     return parsed
 
 
-def chunk_text(content: str, chunk_size: int = 350, overlap: int = 50) -> list[str]:
-    """Split content into stable chunks by character window."""
+def chunk_text(content: str, chunk_size: int = 350, overlap: int = 50) -> list[tuple[int, int, str]]:
+    """Split content into stable chunks by character window with offset metadata."""
     text = content.strip()
     if not text:
         return []
 
-    chunks: list[str] = []
+    chunks: list[tuple[int, int, str]] = []
     step = max(1, chunk_size - overlap)
     for start in range(0, len(text), step):
-        part = text[start : start + chunk_size].strip()
-        if part:
-            chunks.append(part)
-        if start + chunk_size >= len(text):
+        end = min(start + chunk_size, len(text))
+        part = text[start:end]
+        normalized = part.strip()
+        if normalized:
+            chunks.append((start, end, normalized))
+        if end >= len(text):
             break
     return chunks
 
 
-def build_chunk_records(parsed_doc: dict[str, str]) -> list[dict[str, str]]:
-    """Build chunk records with stable chunk_id per doc."""
-    records: list[dict[str, str]] = []
-    for idx, chunk in enumerate(chunk_text(parsed_doc["content"])):
+def build_chunk_records(parsed_doc: dict[str, str]) -> list[dict[str, str | int]]:
+    """Build chunk records with stable chunk_id and auditable offset metadata per doc."""
+    records: list[dict[str, str | int]] = []
+    for idx, (start_char, end_char, chunk) in enumerate(chunk_text(parsed_doc["content"])):
         records.append(
             {
                 "doc_id": parsed_doc["doc_id"],
                 "chunk_id": f"{parsed_doc['doc_id']}::chunk::{idx}",
-                "chunk_index": str(idx),
+                "chunk_index": idx,
+                "start_char": start_char,
+                "end_char": end_char,
                 "category": parsed_doc["category"],
                 "source": parsed_doc["source"],
                 "text": chunk,
@@ -77,7 +81,7 @@ def ingest(
     if not endpoint.hostname:
         raise RuntimeError(f"Invalid WEAVIATE_URL: {weaviate_url}")
 
-    chunk_records: list[dict[str, str]] = []
+    chunk_records: list[dict[str, str | int]] = []
     for path in sorted(directory.glob("*.txt")):
         parsed_doc = parse_seeded_doc(path)
         chunk_records.extend(build_chunk_records(parsed_doc))
@@ -87,7 +91,7 @@ def ingest(
         try:
             from app.embeddings import embed_texts
 
-            vectors = embed_texts([record["text"] for record in chunk_records])
+            vectors = embed_texts([str(record["text"]) for record in chunk_records])
         except Exception as exc:  # noqa: BLE001
             raise RuntimeError(
                 f"Embedding generation failed: {exc}. "
@@ -117,7 +121,13 @@ def ingest(
                         name="chunk_id", data_type=weaviate.classes.config.DataType.TEXT
                     ),
                     weaviate.classes.config.Property(
-                        name="chunk_index", data_type=weaviate.classes.config.DataType.TEXT
+                        name="chunk_index", data_type=weaviate.classes.config.DataType.INT
+                    ),
+                    weaviate.classes.config.Property(
+                        name="start_char", data_type=weaviate.classes.config.DataType.INT
+                    ),
+                    weaviate.classes.config.Property(
+                        name="end_char", data_type=weaviate.classes.config.DataType.INT
                     ),
                     weaviate.classes.config.Property(
                         name="category", data_type=weaviate.classes.config.DataType.TEXT
