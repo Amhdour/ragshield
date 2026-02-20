@@ -26,21 +26,49 @@ def parse_seeded_doc(path: Path) -> dict[str, str]:
         raise RuntimeError(
             f"Invalid doc format in {path}. Expected doc_id/category/source/content lines."
         )
-
-    chunk_index = "0"
-    chunk_id = f"{parsed['doc_id']}:chunk-{chunk_index}"
-    text = parsed["content"]
-    return {
-        "doc_id": parsed["doc_id"],
-        "chunk_id": chunk_id,
-        "chunk_index": chunk_index,
-        "category": parsed["category"],
-        "source": parsed["source"],
-        "text": text,
-    }
+    return parsed
 
 
-def ingest(directory: Path, weaviate_url: str, collection_name: str = COLLECTION_NAME) -> None:
+def chunk_text(content: str, chunk_size: int = 350, overlap: int = 50) -> list[str]:
+    """Split content into stable chunks by character window."""
+    text = content.strip()
+    if not text:
+        return []
+
+    chunks: list[str] = []
+    step = max(1, chunk_size - overlap)
+    for start in range(0, len(text), step):
+        part = text[start : start + chunk_size].strip()
+        if part:
+            chunks.append(part)
+        if start + chunk_size >= len(text):
+            break
+    return chunks
+
+
+def build_chunk_records(parsed_doc: dict[str, str]) -> list[dict[str, str]]:
+    """Build chunk records with stable chunk_id per doc."""
+    records: list[dict[str, str]] = []
+    for idx, chunk in enumerate(chunk_text(parsed_doc["content"])):
+        records.append(
+            {
+                "doc_id": parsed_doc["doc_id"],
+                "chunk_id": f"{parsed_doc['doc_id']}::chunk::{idx}",
+                "chunk_index": str(idx),
+                "category": parsed_doc["category"],
+                "source": parsed_doc["source"],
+                "text": chunk,
+            }
+        )
+    return records
+
+
+def ingest(
+    directory: Path,
+    weaviate_url: str,
+    collection_name: str = COLLECTION_NAME,
+    use_embeddings: bool = True,
+) -> None:
     """Create collection schema and ingest docs from directory."""
     if not directory.exists():
         raise RuntimeError(f"Input directory does not exist: {directory}")
@@ -48,6 +76,23 @@ def ingest(directory: Path, weaviate_url: str, collection_name: str = COLLECTION
     endpoint = urlparse(weaviate_url)
     if not endpoint.hostname:
         raise RuntimeError(f"Invalid WEAVIATE_URL: {weaviate_url}")
+
+    chunk_records: list[dict[str, str]] = []
+    for path in sorted(directory.glob("*.txt")):
+        parsed_doc = parse_seeded_doc(path)
+        chunk_records.extend(build_chunk_records(parsed_doc))
+
+    vectors: list[list[float]] | None = None
+    if use_embeddings:
+        try:
+            from app.embeddings import embed_texts
+
+            vectors = embed_texts([record["text"] for record in chunk_records])
+        except Exception as exc:  # noqa: BLE001
+            raise RuntimeError(
+                f"Embedding generation failed: {exc}. "
+                "Set LITELLM_API_KEY/EMBEDDING_MODEL correctly or run with --no-embeddings for BM25-only mode."
+            ) from exc
 
     try:
         with weaviate.connect_to_custom(
@@ -87,10 +132,12 @@ def ingest(directory: Path, weaviate_url: str, collection_name: str = COLLECTION
             )
 
             collection = client.collections.get(collection_name)
-            for path in sorted(directory.glob("*.txt")):
-                doc = parse_seeded_doc(path)
-                collection.data.insert(doc)
-                print(f"Ingested {path.name} ({doc['category']})")
+            for idx, record in enumerate(chunk_records):
+                if vectors is not None:
+                    collection.data.insert(properties=record, vector=vectors[idx])
+                else:
+                    collection.data.insert(properties=record)
+                print(f"Ingested {record['chunk_id']} ({record['category']})")
     except Exception as exc:  # noqa: BLE001
         raise RuntimeError("Ingestion failed. Ensure Weaviate is reachable and healthy.") from exc
 
@@ -101,9 +148,19 @@ def main() -> None:
     parser.add_argument("--input-dir", default="data/docs", type=Path)
     parser.add_argument("--weaviate-url", default="http://localhost:8080")
     parser.add_argument("--collection", default=COLLECTION_NAME)
+    parser.add_argument(
+        "--no-embeddings",
+        action="store_true",
+        help="Skip embedding generation and ingest in BM25-only mode.",
+    )
     args = parser.parse_args()
 
-    ingest(args.input_dir, args.weaviate_url, args.collection)
+    ingest(
+        directory=args.input_dir,
+        weaviate_url=args.weaviate_url,
+        collection_name=args.collection,
+        use_embeddings=not args.no_embeddings,
+    )
 
 
 if __name__ == "__main__":

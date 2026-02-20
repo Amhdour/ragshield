@@ -25,6 +25,7 @@ pip install -e .
 - `DEFAULT_MODEL`
 - `LITELLM_MODEL` (defaults to `DEFAULT_MODEL` when unset)
 - `STRUCTURED_OUTPUT_MODE` (`auto` | `json_schema` | `prompt_only`)
+- `EMBEDDING_MODEL` (default `text-embedding-3-small`)
 - `LITELLM_API_KEY` (optional)
 - `WEAVIATE_URL`
 - `LANGFUSE_PUBLIC_KEY` (optional)
@@ -64,6 +65,14 @@ curl -fsS http://localhost:8181/health ; echo
 ```bash
 python scripts/seed_test_docs.py
 python scripts/ingest.py --input-dir ./data/docs --weaviate-url http://localhost:8080 --collection RagDoc
+# optional fallback for BM25-only ingestion when embeddings are unavailable
+python scripts/ingest.py --input-dir ./data/docs --weaviate-url http://localhost:8080 --collection RagDoc --no-embeddings
+```
+
+Weaviate object count check:
+
+```bash
+curl -sS http://localhost:8080/v1/objects?class=RagDoc | python -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('objects', [])))"
 ```
 
 ## Run the API

@@ -46,6 +46,7 @@ class Settings:
     DEFAULT_MODEL: str
     LITELLM_MODEL: str
     STRUCTURED_OUTPUT_MODE: str
+    EMBEDDING_MODEL: str
     LITELLM_API_KEY: str | None
     WEAVIATE_URL: str
     LANGFUSE_PUBLIC_KEY: str | None
@@ -75,6 +76,11 @@ class Settings:
     def structured_output_mode(self) -> str:
         """Backwards-compatible lowercase accessor."""
         return self.STRUCTURED_OUTPUT_MODE
+
+    @property
+    def embedding_model(self) -> str:
+        """Backwards-compatible lowercase accessor."""
+        return self.EMBEDDING_MODEL
 
     @property
     def openai_api_key(self) -> str | None:
@@ -142,6 +148,10 @@ def load_settings() -> Settings:
             "Invalid STRUCTURED_OUTPUT_MODE: expected one of 'auto', 'json_schema', 'prompt_only'."
         )
 
+    embedding_model = (os.getenv("EMBEDDING_MODEL", "text-embedding-3-small") or "text-embedding-3-small").strip()
+    if not embedding_model:
+        raise ValueError("Invalid EMBEDDING_MODEL: value cannot be empty.")
+
     ragshield_env = (os.getenv("RAGSHIELD_ENV", "dev") or "dev").strip().lower()
     if ragshield_env not in {"dev", "prod"}:
         raise ValueError("Invalid RAGSHIELD_ENV: expected 'dev' or 'prod'.")
@@ -158,6 +168,7 @@ def load_settings() -> Settings:
         DEFAULT_MODEL=default_model,
         LITELLM_MODEL=litellm_model,
         STRUCTURED_OUTPUT_MODE=structured_output_mode,
+        EMBEDDING_MODEL=embedding_model,
         LITELLM_API_KEY=os.getenv("LITELLM_API_KEY") or None,
         WEAVIATE_URL=_require_http_url(
             "WEAVIATE_URL", os.getenv("WEAVIATE_URL", "http://localhost:8080")
