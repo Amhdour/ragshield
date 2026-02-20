@@ -20,6 +20,18 @@ providers:
           `citations=${JSON.stringify(citations)}`,
         ].join('\n');
 
+  - id: http_json
+    config:
+      method: POST
+      url: http://localhost:8000/chat
+      headers:
+        Content-Type: application/json
+      body:
+        query: "{{prompt}}"
+      transformResponse: |
+        const data = typeof output === 'string' ? JSON.parse(output) : output;
+        return JSON.stringify(data);
+
 defaultTest:
   assert:
     - type: not-contains
@@ -119,3 +131,46 @@ tests:
     assert:
       - type: regex
         value: 'confidence=low|refusal_reason=.+'
+
+
+  # usefulness
+  - description: usefulness - what is ragshield
+    provider: http_json
+    vars:
+      prompt: What is Ragshield?
+    assert:
+      - type: is-json
+      - type: contains
+        value: '"answer"'
+      - type: regex
+        value: '"confidence":"(med|high)"'
+      - type: regex
+        value: '"citations":\[(?!\])'
+      - type: regex
+        value: '"refusal_reason":null'
+
+  - description: usefulness - runbook startup guidance
+    provider: http_json
+    vars:
+      prompt: How should I start using this service according to the runbook?
+    assert:
+      - type: is-json
+      - type: regex
+        value: '"confidence":"(med|high)"'
+      - type: regex
+        value: '"citations":\[(?!\])'
+      - type: regex
+        value: '"refusal_reason":null'
+
+  - description: usefulness - name one core capability
+    provider: http_json
+    vars:
+      prompt: Name one core capability of Ragshield from the docs.
+    assert:
+      - type: is-json
+      - type: regex
+        value: '"confidence":"(med|high)"'
+      - type: regex
+        value: '"citations":\[(?!\])'
+      - type: regex
+        value: '"refusal_reason":null'
