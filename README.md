@@ -32,7 +32,7 @@ pip install -e .
 - `EMBEDDING_MODEL` (optional; embeddings disabled unless both model and base URL are set)
 - `EMBEDDING_API_KEY` (optional; falls back to `LITELLM_API_KEY`)
 - `STRUCTURED_OUTPUT_MODE` (`auto` | `json_schema` | `prompt_only`)
-- `RETRIEVAL_MODE` (`auto` | `bm25` | `hybrid` | `vector`)
+- `RETRIEVAL_MODE` (`auto` | `bm25` | `hybrid`)
 - `WEAVIATE_URL`
 - `LANGFUSE_PUBLIC_KEY` (optional)
 - `LANGFUSE_SECRET_KEY` (optional)

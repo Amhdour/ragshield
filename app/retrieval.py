@@ -10,6 +10,11 @@ import weaviate
 from app.config import settings
 
 
+def embeddings_available() -> bool:
+    """Return True when embedding credentials are present for vector-capable retrieval."""
+    return bool(settings.EMBEDDING_MODEL and settings.EMBEDDING_API_KEY)
+
+
 def _to_int(value: Any) -> int | None:
     """Best-effort int coercion for metadata fields."""
     if value is None or value == "":
@@ -21,13 +26,24 @@ def _to_int(value: Any) -> int | None:
 
 
 def retrieve(query: str, top_k: int) -> list[dict[str, str | int | None]]:
-    """Retrieve matching document chunks from RagDoc by BM25 query."""
+    """Retrieve matching document chunks from RagDoc by BM25 query.
+
+    Retrieval strategy selection is prepared for RETRIEVAL_MODE (`auto|bm25|hybrid`),
+    but currently executes BM25 only.
+    """
     endpoint = urlparse(settings.WEAVIATE_URL)
     if not endpoint.hostname:
         raise RuntimeError(f"Invalid WEAVIATE_URL: {settings.WEAVIATE_URL}")
 
     if top_k < 1:
         raise RuntimeError("top_k must be >= 1")
+
+    if settings.RETRIEVAL_MODE not in {"auto", "bm25", "hybrid"}:
+        raise RuntimeError("Unsupported RETRIEVAL_MODE. Expected one of: auto, bm25, hybrid")
+
+    if settings.RETRIEVAL_MODE == "hybrid" and not embeddings_available():
+        # Preparation path: hybrid mode will require embeddings when implemented.
+        pass
 
     try:
         with weaviate.connect_to_custom(

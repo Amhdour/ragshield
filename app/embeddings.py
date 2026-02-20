@@ -7,6 +7,20 @@ from typing import Any
 from app.config import settings
 
 
+def _extract_vector(item: Any) -> list[float] | None:
+    """Extract embedding vector from dict/object payloads robustly."""
+    if isinstance(item, dict):
+        raw = item.get("embedding")
+    else:
+        raw = getattr(item, "embedding", None)
+    if not isinstance(raw, list) or not raw:
+        return None
+    try:
+        return [float(value) for value in raw]
+    except (TypeError, ValueError):
+        return None
+
+
 def embed_texts(texts: list[str]) -> list[list[float]]:
     """Embed input texts using configured embedding provider and return vectors in input order."""
     if not texts:
@@ -14,7 +28,8 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
 
     if not settings.embeddings_enabled:
         raise RuntimeError(
-            "Embedding failed: embeddings are disabled because EMBEDDING_BASE_URL/EMBEDDING_MODEL are unset."
+            "Embedding failed: EMBEDDING_BASE_URL and EMBEDDING_MODEL must both be set. "
+            "Configure EMBEDDING_* vars (for example OpenRouter) or run ingest with --no-embeddings for BM25-only mode."
         )
 
     cleaned = [t.strip() for t in texts]
@@ -49,9 +64,9 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
 
     vectors: list[list[float]] = []
     for item in data:
-        vector = item.get("embedding") if isinstance(item, dict) else None
-        if not isinstance(vector, list) or not vector:
+        vector = _extract_vector(item)
+        if vector is None:
             raise RuntimeError("Embedding failed: provider returned invalid vector payload.")
-        vectors.append([float(v) for v in vector])
+        vectors.append(vector)
 
     return vectors

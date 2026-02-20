@@ -182,8 +182,8 @@ def load_settings() -> Settings:
         )
 
     retrieval_mode = (os.getenv("RETRIEVAL_MODE", "auto") or "auto").strip().lower()
-    if retrieval_mode not in {"auto", "bm25", "hybrid", "vector"}:
-        raise ValueError("Invalid RETRIEVAL_MODE: expected one of 'auto', 'bm25', 'hybrid', 'vector'.")
+    if retrieval_mode not in {"auto", "bm25", "hybrid"}:
+        raise ValueError("Invalid RETRIEVAL_MODE: expected one of 'auto', 'bm25', 'hybrid'.")
 
     ragshield_env = (os.getenv("RAGSHIELD_ENV", "dev") or "dev").strip().lower()
     if ragshield_env not in {"dev", "prod"}:
