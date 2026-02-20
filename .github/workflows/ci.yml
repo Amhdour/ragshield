@@ -7,11 +7,25 @@ on:
 jobs:
   redteam-gate:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
     env:
-      LITELLM_BASE_URL: https://api.openai.com/v1
-      LITELLM_MODEL: gpt-4o-mini
-      LITELLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      # Chat via LiteLLM proxy (Groq route)
+      CHAT_BASE_URL: http://localhost:4000
+      CHAT_MODEL: groq-llama-3.1-8b-instant
+      CHAT_API_KEY: ""
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+
+      # Embeddings provider for hybrid retrieval
+      EMBEDDING_BASE_URL: https://openrouter.ai/api/v1
+      EMBEDDING_MODEL: text-embedding-3-small
+      EMBEDDING_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      RETRIEVAL_MODE: auto
+
+      # Backward-compatible vars
+      LITELLM_BASE_URL: http://localhost:4000
+      LITELLM_MODEL: groq-llama-3.1-8b-instant
+      LITELLM_API_KEY: ""
+
       WEAVIATE_URL: http://localhost:8080
       OPA_URL: http://localhost:8181
       TOP_K: "5"
@@ -43,10 +57,24 @@ jobs:
       - name: Install Promptfoo
         run: npm install -g promptfoo
 
-      - name: Start required services
-        run: docker compose up -d weaviate opa
+      - name: Detect secret availability for hybrid/usefulness gate
+        id: gate_inputs
+        run: |
+          if [ -n "${{ secrets.OPENROUTER_API_KEY }}" ]; then
+            echo "has_embedding_secret=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_embedding_secret=false" >> "$GITHUB_OUTPUT"
+          fi
+          if [ -n "${{ secrets.GROQ_API_KEY }}" ]; then
+            echo "has_chat_secret=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_chat_secret=false" >> "$GITHUB_OUTPUT"
+          fi
 
-      - name: Wait for Weaviate and OPA health
+      - name: Start required services
+        run: docker compose up -d weaviate opa litellm
+
+      - name: Wait for Weaviate / OPA / LiteLLM health
         run: |
           for i in {1..60}; do
             if curl -fsS http://localhost:8080/v1/.well-known/ready >/dev/null; then
@@ -64,10 +92,26 @@ jobs:
           done
           curl -fsS http://localhost:8181/health >/dev/null
 
-      - name: Seed and ingest docs
+          for i in {1..60}; do
+            if curl -fsS http://localhost:4000/health/liveliness >/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          curl -fsS http://localhost:4000/health/liveliness >/dev/null
+
+      - name: Seed docs
+        run: python scripts/seed_test_docs.py
+
+      - name: Ingest docs with embeddings (hybrid path)
+        if: ${{ steps.gate_inputs.outputs.has_embedding_secret == 'true' }}
+        run: python scripts/ingest.py --input-dir ./data/docs --weaviate-url http://localhost:8080 --collection RagDoc
+
+      - name: Ingest docs without embeddings (graceful fallback)
+        if: ${{ steps.gate_inputs.outputs.has_embedding_secret != 'true' }}
         run: |
-          python scripts/seed_test_docs.py
-          python scripts/ingest.py --input-dir ./data/docs --weaviate-url http://localhost:8080 --collection RagDoc
+          echo "OPENROUTER_API_KEY missing; ingesting BM25-only with --no-embeddings"
+          python scripts/ingest.py --input-dir ./data/docs --weaviate-url http://localhost:8080 --collection RagDoc --no-embeddings
 
       - name: Smoke test (import + compile)
         run: |
@@ -88,15 +132,15 @@ jobs:
           done
           curl -fsS http://localhost:8000/chat -H 'Content-Type: application/json' -d '{"query":"health"}' >/dev/null
 
-      - name: Run Promptfoo red-team gate
-        if: ${{ secrets.OPENAI_API_KEY != '' }}
+      - name: Run Promptfoo red-team + usefulness gate
+        if: ${{ steps.gate_inputs.outputs.has_embedding_secret == 'true' && steps.gate_inputs.outputs.has_chat_secret == 'true' }}
         run: promptfoo eval -c redteam/promptfoo.yaml
 
-      - name: Skip Promptfoo (missing OPENAI_API_KEY)
-        if: ${{ secrets.OPENAI_API_KEY == '' }}
+      - name: Skip Promptfoo usefulness gate (missing required secrets)
+        if: ${{ !(steps.gate_inputs.outputs.has_embedding_secret == 'true' && steps.gate_inputs.outputs.has_chat_secret == 'true') }}
         run: |
-          echo "OPENAI_API_KEY is not available (fork PR or missing secret)."
-          echo "Skipping promptfoo gate; smoke checks still passed."
+          echo "Skipping promptfoo usefulness/hybrid gate."
+          echo "Requires both OPENROUTER_API_KEY (embeddings) and GROQ_API_KEY (chat proxy route)."
 
       - name: Upload app logs on failure
         if: failure()
@@ -110,13 +154,24 @@ jobs:
         run: docker compose down -v
 
   ragas-gate:
-    if: ${{ secrets.OPENAI_API_KEY != '' }}
+    if: ${{ secrets.OPENROUTER_API_KEY != '' && secrets.GROQ_API_KEY != '' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 40
     env:
-      LITELLM_BASE_URL: https://api.openai.com/v1
-      LITELLM_MODEL: gpt-4o-mini
-      LITELLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      CHAT_BASE_URL: http://localhost:4000
+      CHAT_MODEL: groq-llama-3.1-8b-instant
+      CHAT_API_KEY: ""
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+
+      EMBEDDING_BASE_URL: https://openrouter.ai/api/v1
+      EMBEDDING_MODEL: text-embedding-3-small
+      EMBEDDING_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      RETRIEVAL_MODE: auto
+
+      LITELLM_BASE_URL: http://localhost:4000
+      LITELLM_MODEL: groq-llama-3.1-8b-instant
+      LITELLM_API_KEY: ""
+
       WEAVIATE_URL: http://localhost:8080
       OPA_URL: http://localhost:8181
       TOP_K: "5"
@@ -141,9 +196,9 @@ jobs:
           pip install -e .
 
       - name: Start required services
-        run: docker compose up -d weaviate opa
+        run: docker compose up -d weaviate opa litellm
 
-      - name: Wait for Weaviate and OPA health
+      - name: Wait for Weaviate / OPA / LiteLLM health
         run: |
           for i in {1..60}; do
             if curl -fsS http://localhost:8080/v1/.well-known/ready >/dev/null; then
@@ -161,7 +216,15 @@ jobs:
           done
           curl -fsS http://localhost:8181/health >/dev/null
 
-      - name: Seed and ingest docs
+          for i in {1..60}; do
+            if curl -fsS http://localhost:4000/health/liveliness >/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          curl -fsS http://localhost:4000/health/liveliness >/dev/null
+
+      - name: Seed and ingest docs (with embeddings)
         run: |
           python scripts/seed_test_docs.py
           python scripts/ingest.py --input-dir ./data/docs --weaviate-url http://localhost:8080 --collection RagDoc

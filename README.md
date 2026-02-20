@@ -296,11 +296,11 @@ GitHub Actions runs `.github/workflows/ci.yml` on every pull request.
 - starts Weaviate + OPA via Docker Compose
 - seeds + ingests docs
 - runs Python smoke checks (`py_compile` + `import app.main`)
-- runs `promptfoo eval -c redteam/promptfoo.yaml` when `OPENAI_API_KEY` is available
-- skips promptfoo with a clear message when the secret is unavailable (e.g., fork PRs)
+- runs `promptfoo eval -c redteam/promptfoo.yaml` when both `OPENROUTER_API_KEY` (embeddings) and `GROQ_API_KEY` (chat proxy route) are available
+- gracefully falls back to BM25 ingest and skips usefulness/hybrid promptfoo gate when required secrets are unavailable (e.g., fork PRs)
 
 ### `ragas-gate`
-- runs only when `OPENAI_API_KEY` is available
+- runs only when both `OPENROUTER_API_KEY` and `GROQ_API_KEY` are available
 - starts Weaviate + OPA via Docker Compose
 - seeds + ingests docs
 - starts the API and runs `python eval/run_ragas.py --base-url http://localhost:8000`
@@ -314,7 +314,7 @@ Local reproduction:
 ```bash
 pip install -e .
 npm install -g promptfoo
-docker compose up -d weaviate opa
+docker compose up -d weaviate opa litellm
 python scripts/seed_test_docs.py
 python scripts/ingest.py --input-dir ./data/docs --weaviate-url http://localhost:8080 --collection RagDoc
 uvicorn app.main:app --host 0.0.0.0 --port 8000
