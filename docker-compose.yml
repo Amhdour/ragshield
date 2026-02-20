@@ -1,0 +1,66 @@
+services:
+  weaviate:
+    image: cr.weaviate.io/semitechnologies/weaviate:1.27.3
+    ports:
+      - "8080:8080"
+      - "50051:50051"
+    environment:
+      QUERY_DEFAULTS_LIMIT: "20"
+      AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: "true"
+      PERSISTENCE_DATA_PATH: "/var/lib/weaviate"
+      DEFAULT_VECTORIZER_MODULE: "none"
+      ENABLE_MODULES: ""
+      CLUSTER_HOSTNAME: "node1"
+
+  opa:
+    image: openpolicyagent/opa:0.67.1
+    command: ["run", "--server", "--addr", "0.0.0.0:8181", "/policies/policy.rego"]
+    volumes:
+      - ./opa:/policies:ro
+    ports:
+      - "8181:8181"
+
+  litellm:
+    image: ghcr.io/berriai/litellm:main-stable
+    command: ["--config", "/app/litellm_config.yaml", "--port", "4000", "--host", "0.0.0.0"]
+    volumes:
+      - ./litellm_config.yaml:/app/litellm_config.yaml:ro
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-${CHAT_API_KEY:-}}
+      CHAT_API_KEY: ${CHAT_API_KEY:-}
+    ports:
+      - "4000:4000"
+
+  langfuse-postgres:
+    image: postgres:16-alpine
+    profiles: ["langfuse"]
+    environment:
+      POSTGRES_USER: langfuse
+      POSTGRES_PASSWORD: langfuse
+      POSTGRES_DB: langfuse
+    volumes:
+      - langfuse-postgres:/var/lib/postgresql/data
+
+  langfuse-redis:
+    image: redis:7-alpine
+    profiles: ["langfuse"]
+
+  langfuse:
+    image: langfuse/langfuse:2
+    profiles: ["langfuse"]
+    depends_on:
+      - langfuse-postgres
+      - langfuse-redis
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgresql://langfuse:langfuse@langfuse-postgres:5432/langfuse
+      REDIS_CONNECTION_STRING: redis://langfuse-redis:6379
+      NEXTAUTH_URL: http://localhost:3000
+      NEXTAUTH_SECRET: change-me-in-local-dev
+      SALT: change-me-in-local-dev
+      TELEMETRY_ENABLED: "false"
+
+volumes:
+  langfuse-postgres:
