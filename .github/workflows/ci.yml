@@ -103,6 +103,35 @@ jobs:
       - name: Seed docs
         run: python scripts/seed_test_docs.py
 
+      - name: Validate OpenRouter embedding model id (fail-fast)
+        if: ${{ steps.gate_inputs.outputs.has_embedding_secret == 'true' }}
+        run: |
+          set -euo pipefail
+          if ! python - <<'PY'
+          from app.embeddings import validate_embedding_model_id
+          from app.config import settings
+
+          try:
+              validate_embedding_model_id(str(settings.EMBEDDING_MODEL or ""))
+          except Exception as exc:  # noqa: BLE001
+              raise SystemExit(
+                  "Invalid EMBEDDING_MODEL configuration for CI hybrid ingest. "
+                  "Use scripts/check_openrouter_embeddings_models.py to list valid IDs, "
+                  "then update EMBEDDING_MODEL. See README.md#openrouter-embeddings (Provider setup). "
+                  f"Details: {exc}"
+              )
+
+          print(f"embedding model id precheck passed: {settings.EMBEDDING_MODEL}")
+          PY
+          then
+            echo "Embedding model id validation failed."
+            exit 1
+          fi
+
+      - name: Skip embedding model validation (missing OPENROUTER_API_KEY)
+        if: ${{ steps.gate_inputs.outputs.has_embedding_secret != 'true' }}
+        run: echo "OPENROUTER_API_KEY missing; skipping embedding model validation and using BM25-only ingest"
+
       - name: Ingest docs with embeddings (hybrid path)
         if: ${{ steps.gate_inputs.outputs.has_embedding_secret == 'true' }}
         run: python scripts/ingest.py --input-dir ./data/docs --weaviate-url http://localhost:8080 --collection RagDoc
@@ -224,10 +253,31 @@ jobs:
           done
           curl -fsS http://localhost:4000/health/liveliness >/dev/null
 
-      - name: Seed and ingest docs (with embeddings)
+      - name: Seed docs
+        run: python scripts/seed_test_docs.py
+
+      - name: Validate OpenRouter embedding model id (fail-fast)
         run: |
-          python scripts/seed_test_docs.py
-          python scripts/ingest.py --input-dir ./data/docs --weaviate-url http://localhost:8080 --collection RagDoc
+          set -euo pipefail
+          python - <<'PY'
+          from app.embeddings import validate_embedding_model_id
+          from app.config import settings
+
+          try:
+              validate_embedding_model_id(str(settings.EMBEDDING_MODEL or ""))
+          except Exception as exc:  # noqa: BLE001
+              raise SystemExit(
+                  "Invalid EMBEDDING_MODEL configuration for CI hybrid ingest. "
+                  "Use scripts/check_openrouter_embeddings_models.py to list valid IDs, "
+                  "then update EMBEDDING_MODEL. See README.md#openrouter-embeddings (Provider setup). "
+                  f"Details: {exc}"
+              )
+
+          print(f"embedding model id precheck passed: {settings.EMBEDDING_MODEL}")
+          PY
+
+      - name: Ingest docs (with embeddings)
+        run: python scripts/ingest.py --input-dir ./data/docs --weaviate-url http://localhost:8080 --collection RagDoc
 
       - name: Start API
         run: |
