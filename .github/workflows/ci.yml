@@ -106,25 +106,8 @@ jobs:
       - name: Validate OpenRouter embedding model id (fail-fast)
         if: ${{ steps.gate_inputs.outputs.has_embedding_secret == 'true' }}
         run: |
-          set -euo pipefail
-          if ! python - <<'PY'
-          from app.embeddings import validate_embedding_model_id
-          from app.config import settings
-
-          try:
-              validate_embedding_model_id(str(settings.EMBEDDING_MODEL or ""))
-          except Exception as exc:  # noqa: BLE001
-              raise SystemExit(
-                  "Invalid EMBEDDING_MODEL configuration for CI hybrid ingest. "
-                  "Use scripts/check_openrouter_embeddings_models.py to list valid IDs, "
-                  "then update EMBEDDING_MODEL. See README.md#openrouter-embeddings (Provider setup). "
-                  f"Details: {exc}"
-              )
-
-          print(f"embedding model id precheck passed: {settings.EMBEDDING_MODEL}")
-          PY
-          then
-            echo "Embedding model id validation failed."
+          if ! python scripts/check_openrouter_embeddings_models.py --check "$EMBEDDING_MODEL"; then
+            echo "Invalid EMBEDDING_MODEL for OpenRouter. Run scripts/check_openrouter_embeddings_models.py to pick a valid id."
             exit 1
           fi
 
@@ -258,23 +241,10 @@ jobs:
 
       - name: Validate OpenRouter embedding model id (fail-fast)
         run: |
-          set -euo pipefail
-          python - <<'PY'
-          from app.embeddings import validate_embedding_model_id
-          from app.config import settings
-
-          try:
-              validate_embedding_model_id(str(settings.EMBEDDING_MODEL or ""))
-          except Exception as exc:  # noqa: BLE001
-              raise SystemExit(
-                  "Invalid EMBEDDING_MODEL configuration for CI hybrid ingest. "
-                  "Use scripts/check_openrouter_embeddings_models.py to list valid IDs, "
-                  "then update EMBEDDING_MODEL. See README.md#openrouter-embeddings (Provider setup). "
-                  f"Details: {exc}"
-              )
-
-          print(f"embedding model id precheck passed: {settings.EMBEDDING_MODEL}")
-          PY
+          if ! python scripts/check_openrouter_embeddings_models.py --check "$EMBEDDING_MODEL"; then
+            echo "Invalid EMBEDDING_MODEL for OpenRouter. Run scripts/check_openrouter_embeddings_models.py to pick a valid id."
+            exit 1
+          fi
 
       - name: Ingest docs (with embeddings)
         run: python scripts/ingest.py --input-dir ./data/docs --weaviate-url http://localhost:8080 --collection RagDoc
