@@ -17,7 +17,7 @@ jobs:
 
       # Embeddings provider for hybrid retrieval
       EMBEDDING_BASE_URL: https://openrouter.ai/api/v1
-      EMBEDDING_MODEL: text-embedding-3-small
+      EMBEDDING_MODEL: ${{ vars.OPENROUTER_EMBEDDING_MODEL || 'text-embedding-3-small' }}
       EMBEDDING_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
       RETRIEVAL_MODE: auto
 
@@ -106,6 +106,10 @@ jobs:
       - name: Validate OpenRouter embedding model id (fail-fast)
         if: ${{ steps.gate_inputs.outputs.has_embedding_secret == 'true' }}
         run: |
+          if [ -z "${EMBEDDING_MODEL:-}" ]; then
+            echo "Set repo variable OPENROUTER_EMBEDDING_MODEL or provide workflow input."
+            exit 1
+          fi
           if ! python scripts/check_openrouter_embeddings_models.py --check "$EMBEDDING_MODEL"; then
             echo "Invalid EMBEDDING_MODEL for OpenRouter. Run scripts/check_openrouter_embeddings_models.py to pick a valid id."
             exit 1
@@ -176,7 +180,7 @@ jobs:
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
 
       EMBEDDING_BASE_URL: https://openrouter.ai/api/v1
-      EMBEDDING_MODEL: text-embedding-3-small
+      EMBEDDING_MODEL: ${{ vars.OPENROUTER_EMBEDDING_MODEL || 'text-embedding-3-small' }}
       EMBEDDING_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
       RETRIEVAL_MODE: auto
 
@@ -241,6 +245,10 @@ jobs:
 
       - name: Validate OpenRouter embedding model id (fail-fast)
         run: |
+          if [ -z "${EMBEDDING_MODEL:-}" ]; then
+            echo "Set repo variable OPENROUTER_EMBEDDING_MODEL or provide workflow input."
+            exit 1
+          fi
           if ! python scripts/check_openrouter_embeddings_models.py --check "$EMBEDDING_MODEL"; then
             echo "Invalid EMBEDDING_MODEL for OpenRouter. Run scripts/check_openrouter_embeddings_models.py to pick a valid id."
             exit 1

@@ -330,6 +330,11 @@ Artifacts are written under `redteam/results/`.
 
 GitHub Actions runs `.github/workflows/ci.yml` on every pull request.
 
+CI configuration for OpenRouter embeddings model:
+- Set repository variable at **Settings → Secrets and variables → Actions → Variables**:
+  - `OPENROUTER_EMBEDDING_MODEL=<valid-id>`
+- CI uses `OPENROUTER_EMBEDDING_MODEL` (fallback: `text-embedding-3-small`) as `EMBEDDING_MODEL` and validates it before hybrid ingest when `OPENROUTER_API_KEY` is present.
+
 ### `redteam-gate`
 - installs Python + Node dependencies
 - starts Weaviate + OPA via Docker Compose
