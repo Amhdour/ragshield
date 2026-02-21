@@ -1,0 +1,353 @@
+name: CI
+
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      openrouter_embedding_model:
+        description: "OpenRouter embedding model id"
+        required: false
+        default: ""
+
+jobs:
+  redteam-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      # Chat via LiteLLM proxy (Groq route)
+      CHAT_BASE_URL: http://localhost:4000
+      CHAT_MODEL: groq-llama-3.1-8b-instant
+      CHAT_API_KEY: ""
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+
+      # Embeddings provider for hybrid retrieval
+      EMBEDDING_BASE_URL: https://openrouter.ai/api/v1
+      EMBEDDING_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      RETRIEVAL_MODE: auto
+
+      # Backward-compatible vars
+      LITELLM_BASE_URL: http://localhost:4000
+      LITELLM_MODEL: groq-llama-3.1-8b-instant
+      LITELLM_API_KEY: ""
+
+      WEAVIATE_URL: http://localhost:8080
+      OPA_URL: http://localhost:8181
+      TOP_K: "5"
+      LANGFUSE_PUBLIC_KEY: ""
+      LANGFUSE_SECRET_KEY: ""
+      LANGFUSE_HOST: ""
+      RAGSHIELD_ENV: dev
+      DEBUG_TRACE: "false"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Promptfoo
+        run: npm install -g promptfoo
+
+      - name: Detect secret availability for hybrid/usefulness gate
+        id: gate_inputs
+        run: |
+          if [ -n "${{ secrets.OPENROUTER_API_KEY }}" ]; then
+            echo "has_embedding_secret=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_embedding_secret=false" >> "$GITHUB_OUTPUT"
+          fi
+          if [ -n "${{ secrets.GROQ_API_KEY }}" ]; then
+            echo "has_chat_secret=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_chat_secret=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Resolve embedding model (input -> repo var -> fallback)
+        run: |
+          resolved_model="${{ inputs.openrouter_embedding_model || vars.OPENROUTER_EMBEDDING_MODEL || 'text-embedding-3-small' }}"
+          echo "EMBEDDING_MODEL=$resolved_model" >> "$GITHUB_ENV"
+          echo "Resolved EMBEDDING_MODEL=$resolved_model"
+
+      - name: Start required services
+        run: docker compose up -d weaviate opa litellm
+
+      - name: Wait for Weaviate / OPA / LiteLLM health
+        run: |
+          for i in {1..60}; do
+            if curl -fsS http://localhost:8080/v1/.well-known/ready >/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          curl -fsS http://localhost:8080/v1/.well-known/ready >/dev/null
+
+          for i in {1..60}; do
+            if curl -fsS http://localhost:8181/health >/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          curl -fsS http://localhost:8181/health >/dev/null
+
+          for i in {1..60}; do
+            if curl -fsS http://localhost:4000/health/liveliness >/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          curl -fsS http://localhost:4000/health/liveliness >/dev/null
+
+      - name: Seed docs
+        run: python scripts/seed_test_docs.py
+
+      - name: Validate OpenRouter embedding model id (fail-fast)
+        if: ${{ steps.gate_inputs.outputs.has_embedding_secret == 'true' }}
+        run: |
+          if [ -z "${EMBEDDING_MODEL:-}" ]; then
+            echo "Set repo variable OPENROUTER_EMBEDDING_MODEL or provide workflow input."
+            exit 1
+          fi
+          if ! python scripts/check_openrouter_embeddings_models.py --check "$EMBEDDING_MODEL"; then
+            echo "Invalid EMBEDDING_MODEL for OpenRouter."
+            echo "EMBEDDING_MODEL=$EMBEDDING_MODEL"
+            echo "Hint: run python scripts/check_openrouter_embeddings_models.py --contains embedding"
+            echo "Hint: set repo variable OPENROUTER_EMBEDDING_MODEL to a valid id"
+            exit 1
+          fi
+
+      - name: Skip embedding model validation (missing OPENROUTER_API_KEY)
+        if: ${{ steps.gate_inputs.outputs.has_embedding_secret != 'true' }}
+        run: echo "OPENROUTER_API_KEY missing; skipping embedding model validation and using BM25-only ingest"
+
+      - name: Ingest docs with embeddings (hybrid path)
+        if: ${{ steps.gate_inputs.outputs.has_embedding_secret == 'true' }}
+        run: python scripts/ingest.py --input-dir ./data/docs --weaviate-url http://localhost:8080 --collection RagDoc
+
+      - name: Ingest docs without embeddings (graceful fallback)
+        if: ${{ steps.gate_inputs.outputs.has_embedding_secret != 'true' }}
+        run: |
+          echo "OPENROUTER_API_KEY missing; ingesting BM25-only with --no-embeddings"
+          python scripts/ingest.py --input-dir ./data/docs --weaviate-url http://localhost:8080 --collection RagDoc --no-embeddings
+
+      - name: Smoke test (import + compile)
+        run: |
+          python -m py_compile $(git ls-files '*.py')
+          python - <<'PY'
+          import app.main  # noqa: F401
+          print('smoke import ok')
+          PY
+
+      - name: Start API
+        run: |
+          nohup uvicorn app.main:app --host 0.0.0.0 --port 8000 >/tmp/uvicorn.log 2>&1 &
+          for i in {1..60}; do
+            if curl -fsS http://localhost:8000/chat -H 'Content-Type: application/json' -d '{"query":"health"}' >/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          curl -fsS http://localhost:8000/chat -H 'Content-Type: application/json' -d '{"query":"health"}' >/dev/null
+
+      - name: Run Promptfoo red-team + usefulness gate
+        if: ${{ steps.gate_inputs.outputs.has_embedding_secret == 'true' && steps.gate_inputs.outputs.has_chat_secret == 'true' }}
+        run: promptfoo eval -c redteam/promptfoo.yaml
+
+      - name: Skip Promptfoo usefulness gate (missing required secrets)
+        if: ${{ !(steps.gate_inputs.outputs.has_embedding_secret == 'true' && steps.gate_inputs.outputs.has_chat_secret == 'true') }}
+        run: |
+          echo "Skipping promptfoo usefulness/hybrid gate."
+          echo "Requires both OPENROUTER_API_KEY (embeddings) and GROQ_API_KEY (chat proxy route)."
+
+      - name: Upload app logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uvicorn-log-redteam
+          path: /tmp/uvicorn.log
+
+      - name: Teardown services
+        if: always()
+        run: docker compose down -v
+
+  ragas-gate:
+    if: ${{ secrets.OPENROUTER_API_KEY != '' && secrets.GROQ_API_KEY != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      CHAT_BASE_URL: http://localhost:4000
+      CHAT_MODEL: groq-llama-3.1-8b-instant
+      CHAT_API_KEY: ""
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+
+      EMBEDDING_BASE_URL: https://openrouter.ai/api/v1
+      EMBEDDING_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      RETRIEVAL_MODE: auto
+
+      LITELLM_BASE_URL: http://localhost:4000
+      LITELLM_MODEL: groq-llama-3.1-8b-instant
+      LITELLM_API_KEY: ""
+
+      WEAVIATE_URL: http://localhost:8080
+      OPA_URL: http://localhost:8181
+      TOP_K: "5"
+      LANGFUSE_PUBLIC_KEY: ""
+      LANGFUSE_SECRET_KEY: ""
+      LANGFUSE_HOST: ""
+      RAGSHIELD_ENV: dev
+      DEBUG_TRACE: "false"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: Resolve embedding model (input -> repo var -> fallback)
+        run: |
+          resolved_model="${{ inputs.openrouter_embedding_model || vars.OPENROUTER_EMBEDDING_MODEL || 'text-embedding-3-small' }}"
+          echo "EMBEDDING_MODEL=$resolved_model" >> "$GITHUB_ENV"
+          echo "Resolved EMBEDDING_MODEL=$resolved_model"
+
+      - name: Start required services
+        run: docker compose up -d weaviate opa litellm
+
+      - name: Wait for Weaviate / OPA / LiteLLM health
+        run: |
+          for i in {1..60}; do
+            if curl -fsS http://localhost:8080/v1/.well-known/ready >/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          curl -fsS http://localhost:8080/v1/.well-known/ready >/dev/null
+
+          for i in {1..60}; do
+            if curl -fsS http://localhost:8181/health >/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          curl -fsS http://localhost:8181/health >/dev/null
+
+          for i in {1..60}; do
+            if curl -fsS http://localhost:4000/health/liveliness >/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          curl -fsS http://localhost:4000/health/liveliness >/dev/null
+
+      - name: Seed docs
+        run: python scripts/seed_test_docs.py
+
+      - name: Validate OpenRouter embedding model id (fail-fast)
+        run: |
+          if [ -z "${EMBEDDING_MODEL:-}" ]; then
+            echo "Set repo variable OPENROUTER_EMBEDDING_MODEL or provide workflow input."
+            exit 1
+          fi
+          if ! python scripts/check_openrouter_embeddings_models.py --check "$EMBEDDING_MODEL"; then
+            echo "Invalid EMBEDDING_MODEL for OpenRouter."
+            echo "EMBEDDING_MODEL=$EMBEDDING_MODEL"
+            echo "Hint: run python scripts/check_openrouter_embeddings_models.py --contains embedding"
+            echo "Hint: set repo variable OPENROUTER_EMBEDDING_MODEL to a valid id"
+            exit 1
+          fi
+
+      - name: Ingest docs (with embeddings)
+        run: python scripts/ingest.py --input-dir ./data/docs --weaviate-url http://localhost:8080 --collection RagDoc
+
+      - name: Start API
+        run: |
+          nohup uvicorn app.main:app --host 0.0.0.0 --port 8000 >/tmp/uvicorn-ragas.log 2>&1 &
+          for i in {1..60}; do
+            if curl -fsS http://localhost:8000/chat -H 'Content-Type: application/json' -d '{"query":"health"}' >/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          curl -fsS http://localhost:8000/chat -H 'Content-Type: application/json' -d '{"query":"health"}' >/dev/null
+
+      - name: Run RAGAS evaluation
+        run: python eval/run_ragas.py --base-url http://localhost:8000
+
+      - name: Enforce RAGAS thresholds
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          report = Path("eval/report.json")
+          if not report.exists():
+              raise SystemExit("Missing eval/report.json")
+
+          data = json.loads(report.read_text(encoding="utf-8"))
+          averages = data.get("averages", {}) if isinstance(data, dict) else {}
+
+          faithfulness = averages.get("faithfulness_mean", averages.get("faithfulness", 0.0))
+          answer_relevancy = averages.get("answer_relevancy_mean", averages.get("answer_relevancy", 0.0))
+
+          faithfulness = float(faithfulness)
+          answer_relevancy = float(answer_relevancy)
+
+          threshold_faithfulness = 0.70
+          threshold_answer_relevancy = 0.70
+
+          print(f"faithfulness={faithfulness:.4f} (threshold {threshold_faithfulness:.2f})")
+          print(f"answer_relevancy={answer_relevancy:.4f} (threshold {threshold_answer_relevancy:.2f})")
+
+          failures = []
+          if faithfulness < threshold_faithfulness:
+              failures.append(
+                  f"faithfulness below threshold: {faithfulness:.4f} < {threshold_faithfulness:.2f}"
+              )
+          if answer_relevancy < threshold_answer_relevancy:
+              failures.append(
+                  "answer_relevancy below threshold: "
+                  f"{answer_relevancy:.4f} < {threshold_answer_relevancy:.2f}"
+              )
+
+          if failures:
+              raise SystemExit("; ".join(failures))
+          PY
+
+      - name: Upload RAGAS artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ragas-report
+          path: |
+            eval/report.json
+            eval/report.md
+
+      - name: Upload app logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uvicorn-log-ragas
+          path: /tmp/uvicorn-ragas.log
+
+      - name: Teardown services
+        if: always()
+        run: docker compose down -v
