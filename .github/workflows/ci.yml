@@ -121,7 +121,10 @@ jobs:
             exit 1
           fi
           if ! python scripts/check_openrouter_embeddings_models.py --check "$EMBEDDING_MODEL"; then
-            echo "Invalid EMBEDDING_MODEL for OpenRouter. Run scripts/check_openrouter_embeddings_models.py to pick a valid id."
+            echo "Invalid EMBEDDING_MODEL for OpenRouter."
+            echo "EMBEDDING_MODEL=$EMBEDDING_MODEL"
+            echo "Hint: run python scripts/check_openrouter_embeddings_models.py --contains embedding"
+            echo "Hint: set repo variable OPENROUTER_EMBEDDING_MODEL to a valid id"
             exit 1
           fi
 
@@ -265,7 +268,10 @@ jobs:
             exit 1
           fi
           if ! python scripts/check_openrouter_embeddings_models.py --check "$EMBEDDING_MODEL"; then
-            echo "Invalid EMBEDDING_MODEL for OpenRouter. Run scripts/check_openrouter_embeddings_models.py to pick a valid id."
+            echo "Invalid EMBEDDING_MODEL for OpenRouter."
+            echo "EMBEDDING_MODEL=$EMBEDDING_MODEL"
+            echo "Hint: run python scripts/check_openrouter_embeddings_models.py --contains embedding"
+            echo "Hint: set repo variable OPENROUTER_EMBEDDING_MODEL to a valid id"
             exit 1
           fi
 
