@@ -2,19 +2,82 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from app.config import settings
 
+logger = logging.getLogger(__name__)
+_OPENROUTER_MODEL_IDS_CACHE: set[str] | None = None
+
+
+def _fetch_openrouter_embedding_model_ids(api_key: str) -> set[str]:
+    """Fetch and cache OpenRouter embedding model IDs for this process."""
+    global _OPENROUTER_MODEL_IDS_CACHE
+
+    if _OPENROUTER_MODEL_IDS_CACHE is not None:
+        return _OPENROUTER_MODEL_IDS_CACHE
+
+    try:
+        import requests
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError(
+            "Failed to validate OpenRouter EMBEDDING_MODEL: requests dependency is unavailable."
+        ) from exc
+
+    try:
+        response = requests.get(
+            "https://openrouter.ai/api/v1/embeddings/models",
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=15,
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError(
+            "Failed to validate OpenRouter EMBEDDING_MODEL via model discovery endpoint. "
+            "Run scripts/check_openrouter_embeddings_models.py to inspect available model IDs. "
+            f"Details: {exc}"
+        ) from exc
+
+    model_ids: set[str] = set()
+    if isinstance(payload, dict):
+        data = payload.get("data")
+        if isinstance(data, list):
+            for item in data:
+                if isinstance(item, dict):
+                    model_id = item.get("id")
+                    if isinstance(model_id, str) and model_id.strip():
+                        model_ids.add(model_id.strip())
+
+    _OPENROUTER_MODEL_IDS_CACHE = model_ids
+    return model_ids
+
 
 def validate_embedding_model_id(model_id: str) -> None:
-    """Validate embedding model id conventions for known providers."""
+    """Validate embedding model id with provider-aware checks."""
+    normalized_model_id = (model_id or "").strip()
+    if not normalized_model_id:
+        raise RuntimeError("Invalid EMBEDDING_MODEL: value must be non-empty.")
+
     base_url = (settings.EMBEDDING_BASE_URL or "").lower()
-    if "openrouter.ai" in base_url and "/" not in model_id:
+    if "openrouter.ai" not in base_url:
+        return
+
+    api_key = (settings.EMBEDDING_API_KEY or "").strip()
+    if not api_key:
+        logger.warning(
+            "OpenRouter embedding model availability check skipped: EMBEDDING_API_KEY is not set. "
+            "Cannot verify EMBEDDING_MODEL '%s' against OpenRouter catalog.",
+            normalized_model_id,
+        )
+        return
+
+    available_ids = _fetch_openrouter_embedding_model_ids(api_key)
+    if normalized_model_id not in available_ids:
         raise RuntimeError(
-            "Invalid EMBEDDING_MODEL for OpenRouter. OpenRouter model IDs are typically "
-            "namespaced like provider/model. Run scripts/check_openrouter_embeddings_models.py "
-            "to pick a valid id."
+            f"EMBEDDING_MODEL '{normalized_model_id}' not available on OpenRouter. "
+            "Run scripts/check_openrouter_embeddings_models.py to choose a valid one."
         )
 
 
