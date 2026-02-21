@@ -334,6 +334,7 @@ CI configuration for OpenRouter embeddings model:
 - Set repository variable at **Settings → Secrets and variables → Actions → Variables**:
   - `OPENROUTER_EMBEDDING_MODEL=<valid-id>`
 - CI uses `OPENROUTER_EMBEDDING_MODEL` (fallback: `text-embedding-3-small`) as `EMBEDDING_MODEL` and validates it before hybrid ingest when `OPENROUTER_API_KEY` is present.
+- For manual runs (**Actions → CI → Run workflow**), optionally set input `openrouter_embedding_model` to override the repo variable for that run only.
 
 ### `redteam-gate`
 - installs Python + Node dependencies

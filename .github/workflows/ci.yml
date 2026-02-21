@@ -3,6 +3,11 @@ name: CI
 on:
   pull_request:
   workflow_dispatch:
+    inputs:
+      openrouter_embedding_model:
+        description: "OpenRouter embedding model id"
+        required: false
+        default: ""
 
 jobs:
   redteam-gate:
@@ -17,7 +22,6 @@ jobs:
 
       # Embeddings provider for hybrid retrieval
       EMBEDDING_BASE_URL: https://openrouter.ai/api/v1
-      EMBEDDING_MODEL: ${{ vars.OPENROUTER_EMBEDDING_MODEL || 'text-embedding-3-small' }}
       EMBEDDING_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
       RETRIEVAL_MODE: auto
 
@@ -70,6 +74,12 @@ jobs:
           else
             echo "has_chat_secret=false" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Resolve embedding model (input -> repo var -> fallback)
+        run: |
+          resolved_model="${{ inputs.openrouter_embedding_model || vars.OPENROUTER_EMBEDDING_MODEL || 'text-embedding-3-small' }}"
+          echo "EMBEDDING_MODEL=$resolved_model" >> "$GITHUB_ENV"
+          echo "Resolved EMBEDDING_MODEL=$resolved_model"
 
       - name: Start required services
         run: docker compose up -d weaviate opa litellm
@@ -180,7 +190,6 @@ jobs:
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
 
       EMBEDDING_BASE_URL: https://openrouter.ai/api/v1
-      EMBEDDING_MODEL: ${{ vars.OPENROUTER_EMBEDDING_MODEL || 'text-embedding-3-small' }}
       EMBEDDING_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
       RETRIEVAL_MODE: auto
 
@@ -210,6 +219,12 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e .
+
+      - name: Resolve embedding model (input -> repo var -> fallback)
+        run: |
+          resolved_model="${{ inputs.openrouter_embedding_model || vars.OPENROUTER_EMBEDDING_MODEL || 'text-embedding-3-small' }}"
+          echo "EMBEDDING_MODEL=$resolved_model" >> "$GITHUB_ENV"
+          echo "Resolved EMBEDDING_MODEL=$resolved_model"
 
       - name: Start required services
         run: docker compose up -d weaviate opa litellm
